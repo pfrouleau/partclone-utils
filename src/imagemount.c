@@ -359,6 +359,8 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx)
      */
     create_pid_file(ncp, getpid(), &pidfile);
 
+    printf("mount \"%s\" ready\n", ncp->svc_mount, pctx);
+
     /*
      * Do work until we're completely done.
      */
@@ -752,6 +754,7 @@ main(int argc, char *argv[])
 	if (!(error = image_open(file, cfile, 
 				 (nc.svc_rdonly) ? SYSDEP_OPEN_RO : SYSDEP_OPEN_RW,
 				 &posix_dispatch, &pctx))) {
+		printf("Preparing \"%s\"...\n", file);
 	    /*
 	     * Verify the image.
 	     */
