@@ -244,6 +244,44 @@ v1_init(pc_context_t *pcp)
     return(error);
 }
 
+int
+read_bitmap_byte(pc_context_t *pcp)
+{
+    int error;
+    u_int64_t r_size;
+    v1_context_t *v1p = (v1_context_t *) pcp->pc_verdep;
+
+    if (((error = posix_read(pcp->pc_fd, v1p->v1_bitmap,
+			     pcp->pc_desc.fs.totalblock,
+			     &r_size)) == 0) &&
+	(r_size != pcp->pc_desc.fs.totalblock)) {
+	error = EINVAL;
+    }
+    return(error);
+}
+
+static int
+v1_read_bitmap(pc_context_t *pcp)
+{
+    int error;
+    u_int64_t r_size;
+    char magicstr[MAGIC_LEN];
+
+    /*
+     * Fill the bitmap and look for the magic string
+     */
+    if ((error = read_bitmap_byte(pcp)) == 0) {
+	if ((error = posix_read(pcp->pc_fd, magicstr,
+			        sizeof(magicstr), &r_size)) == 0) {
+	    if ((r_size != sizeof(magicstr)) ||
+		(memcmp(magicstr, cmagicstr, sizeof(magicstr)) != 0)) {
+		error = EINVAL;
+	    }
+	}
+    }
+    return(error);
+}
+
 /*
  * v1_verify	- Verify the currently open file.
  *
@@ -257,96 +295,86 @@ v1_verify(pc_context_t *pcp)
 
     if (PCTX_OPEN(pcp)) {
 	v1_context_t *v1p = (v1_context_t *) pcp->pc_verdep;
+
+	posix_seek(pcp->pc_fd, sizeof(image_desc_v1),
+		   SYSDEP_SEEK_ABSOLUTE, (u_int64_t *) NULL);
 	/*
-	 * Allocate and fill the bitmap.
+	 * Allocate the bitmap.
 	 */
 	if ((error = posix_malloc(&v1p->v1_bitmap,
-		sizeof(unsigned char) * pcp->pc_desc.fs.totalblock)) == 0) {
+				  pcp->pc_desc.fs.totalblock)) == 0) {
 	    u_int64_t r_size;
 
-	    (void) posix_seek(pcp->pc_fd, sizeof(image_desc_v1),
-		    SYSDEP_SEEK_ABSOLUTE, (u_int64_t *) NULL);
-	    if (((error = posix_read(pcp->pc_fd, v1p->v1_bitmap,
-		    pcp->pc_desc.fs.totalblock,
-		    &r_size)) == 0) &&
-		    (r_size == pcp->pc_desc.fs.totalblock)) {
-		char magicstr[MAGIC_LEN];
-		/*
-		 * Finally look for the magic string.
-		 */
-		if (((error = posix_read(pcp->pc_fd, magicstr,
-			sizeof(magicstr), &r_size)) == 0) &&
-			(r_size == sizeof(magicstr)) &&
-			(memcmp(magicstr, cmagicstr, sizeof(magicstr)) == 0)) {
-		    if ((error = posix_malloc(&v1p->v1_sumcount,
-			    ((pcp->pc_desc.fs.totalblock >>
-				    v1p->v1_bitmap_factor)+1) *
-				    sizeof(u_int64_t))) == 0) {
+	    if ((error = v1_read_bitmap(pcp) == 0)) {
+		if ((error =
+		     posix_malloc(&v1p->v1_sumcount,
+				  ((pcp->pc_desc.fs.totalblock >>
+				   v1p->v1_bitmap_factor)+1) *
+				  sizeof(u_int64_t))) == 0) {
 			/*
 			 * Precalculate the count of preceding valid blocks
 			 * for every 1k blocks.
 			 */
 			u_int64_t i, nset = 0;
 			for (i=0; i<pcp->pc_desc.fs.totalblock; i++) {
-			    if ((i & ((1<<v1p->v1_bitmap_factor)-1)) == 0) {
-				v1p->v1_sumcount[i>>v1p->v1_bitmap_factor] =
-					nset;
-			    }
-			    /* [2011-08]
-			     * ...sigh... the *bitmap* can have more than
-			     * two values.  It can be 1, in which case it's
-			     * definitely in the file.  It can be zero
-			     * in which case, it's definitely not in the
-			     * file.  And it can be anything else that fits
-			     * into a byte?  What does it mean?  I don't
-			     * know.  But it's not set.
-			     */
-			    if (v1p->v1_bitmap[i] == 1)
-				nset++;
+				if ((i & ((1<<v1p->v1_bitmap_factor)-1)) == 0) {
+				    v1p->v1_sumcount[i>>v1p->v1_bitmap_factor] =
+				    nset;
 			}
-			/*
-			 * Fixup device size...
+			/* [2011-08]
+			 * ...sigh... the *bitmap* can have more than
+			 * two values.  It can be 1, in which case it's
+			 * definitely in the file.  It can be zero
+			 * in which case, it's definitely not in the
+			 * file.  And it can be anything else that fits
+			 * into a byte?  What does it mean?  I don't
+			 * know.  But it's not set.
 			 */
-			i = pcp->pc_desc.fs.totalblock *
-				pcp->pc_desc.fs.block_size;
-			if (pcp->pc_desc.fs.device_size != i)
-			    pcp->pc_desc.fs.device_size = i;
-
-			/*
-			 * Is the count of used blocks good?
-			 */
-			if (pcp->pc_desc.fs.usedblocks != nset) {
-			    /* [2011-08]
-			     * What should we do in this case?  The old
-			     * version punted, thinking that it is an
-			     * inconsistency.  However, at the time of
-			     * header construction it may not be possible
-			     * to get a definitive count of used blocks
-			     * without scanning the entire bitmap.  So
-			     * some filesystems use a derived count, which
-			     * can be off.  So, we don't turn on
-			     * STRICT_HEADERS (for now).
-			     */
-#ifdef	STRICT_HEADERS
-			    error = EFAULT;
-#else	/* STRICT_HEADERS */
-			    /* what?! - Fix it up silently. */
-			    pcp->pc_desc.fs.usedblocks = nset;
-#endif	/* STRICT_HEADERS */
-			}
-			if (!error && pcp->pc_cf_handle) {
-			    /*
-			     * Verify the change file, if present.
-			     */
-			    error = cf_verify(pcp->pc_cf_handle);
-			    if (!error)
-				pcp->pc_flags |= PC_CF_VERIFIED;
-			}
+			if (v1p->v1_bitmap[i] == 1)
+			    nset++;
 		    }
-		} else {
-		    if (error == 0)
-			error = EINVAL;
+		    /*
+		     * Fixup device size...
+		     */
+		    i = pcp->pc_desc.fs.totalblock *
+			pcp->pc_desc.fs.block_size;
+		    if (pcp->pc_desc.fs.device_size != i)
+			pcp->pc_desc.fs.device_size = i;
+
+		    /*
+		     * Is the count of used blocks good?
+		     */
+		    if (pcp->pc_desc.fs.usedblocks != nset) {
+			/* [2011-08]
+			 * What should we do in this case?  The old
+			 * version punted, thinking that it is an
+			 * inconsistency.  However, at the time of
+			 * header construction it may not be possible
+			 * to get a definitive count of used blocks
+			 * without scanning the entire bitmap.  So
+			 * some filesystems use a derived count, which
+			 * can be off.  So, we don't turn on
+			 * STRICT_HEADERS (for now).
+			 */
+#ifdef	STRICT_HEADERS
+			error = EFAULT;
+#else	/* STRICT_HEADERS */
+			/* what?! - Fix it up silently. */
+			pcp->pc_desc.fs.usedblocks = nset;
+#endif	/* STRICT_HEADERS */
+		    }
+		    if (!error && pcp->pc_cf_handle) {
+			/*
+			 * Verify the change file, if present.
+			 */
+			error = cf_verify(pcp->pc_cf_handle);
+			if (!error)
+			    pcp->pc_flags |= PC_CF_VERIFIED;
+		    }
 		}
+	    } else {
+		if (error == 0)
+		    error = EINVAL;
 	    }
 	}
     }
