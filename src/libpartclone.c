@@ -53,7 +53,7 @@ typedef struct libpc_context {
     void		*pc_verdep;	/* Version-dependent handle */
     struct version_dispatch_table
 			*pc_dispatch;	/* Version-dependent dispatch */
-    image_head		pc_head;	/* Image header */
+    image_desc		pc_desc;	/* Image desc */
     u_int64_t		pc_curblock;	/* Current position */
     u_int32_t		pc_flags;	/* Handle flags */
     sysdep_open_mode_t	pc_omode;	/* Open mode */
@@ -94,7 +94,7 @@ typedef struct libpc_context {
  * Version dispatch table - to handle different file format versions.
  */
 typedef struct version_dispatch_table {
-    char	version[VERSION_SIZE+1];
+    char	version[IMAGE_VERSION_SIZE+1];
     int		(*version_init)(pc_context_t *pcp);
     int		(*version_verify)(pc_context_t *pcp);
     int		(*version_finish)(pc_context_t *pcp);
@@ -155,8 +155,8 @@ v1_init(pc_context_t *pcp)
 	    if (pcp->pc_cf_path && 
 		((int) pcp->pc_omode >= (int) SYSDEP_OPEN_RW) &&
 		((error = cf_init(pcp->pc_cf_path,
-				  pcp->pc_head.block_size,
-				  pcp->pc_head.totalblock,
+				  pcp->pc_desc.fs.block_size,
+				  pcp->pc_desc.fs.totalblock,
 				  &pcp->pc_cf_handle)) == 0)) {
 		pcp->pc_flags |= PC_CF_OPEN;
 	    } else {
@@ -202,7 +202,7 @@ v1_verify(pc_context_t *pcp)
 	/*
 	 * Verify the header magic.
 	 */
-	if (memcmp(pcp->pc_head.magic, IMAGE_MAGIC, IMAGE_MAGIC_SIZE) == 0) {
+	if (memcmp(pcp->pc_desc.head.magic, IMAGE_MAGIC, IMAGE_MAGIC_SIZE) == 0) {
 	    v1_context_t *v1p = (v1_context_t *) pcp->pc_verdep;
 
 	    pcp->pc_flags |= PC_HEAD_VALID;
@@ -210,15 +210,15 @@ v1_verify(pc_context_t *pcp)
 	     * Allocate and fill the bitmap.
 	     */
 	    if ((error = posix_malloc(&v1p->v1_bitmap,
-		  sizeof(unsigned char) * pcp->pc_head.totalblock)) == 0) {
+		  sizeof(unsigned char) * pcp->pc_desc.fs.totalblock)) == 0) {
 		u_int64_t r_size;
 
-		(void) posix_seek(pcp->pc_fd, sizeof(pcp->pc_head),
+		(void) posix_seek(pcp->pc_fd, sizeof(pcp->pc_desc),
 				  SYSDEP_SEEK_ABSOLUTE, (u_int64_t *) NULL);
 		if (((error = posix_read(pcp->pc_fd, v1p->v1_bitmap,
-					 pcp->pc_head.totalblock,
+					 pcp->pc_desc.fs.totalblock,
 					 &r_size)) == 0) &&
-		    (r_size == pcp->pc_head.totalblock)) {
+		    (r_size == pcp->pc_desc.fs.totalblock)) {
 		    char magicstr[MAGIC_LEN];
 		    /*
 		     * Finally look for the magic string.
@@ -228,7 +228,7 @@ v1_verify(pc_context_t *pcp)
 			(r_size == sizeof(magicstr)) &&
 			(memcmp(magicstr, cmagicstr, sizeof(magicstr)) == 0)) {
 			if ((error = posix_malloc(&v1p->v1_sumcount,
-			      ((pcp->pc_head.totalblock >> 
+			      ((pcp->pc_desc.fs.totalblock >>
 				v1p->v1_bitmap_factor)+1) * 
 			      sizeof(u_int64_t))) == 0) {
 			    /*
@@ -236,7 +236,7 @@ v1_verify(pc_context_t *pcp)
 			     * for every 1k blocks.
 			     */
 			    u_int64_t i, nset = 0;
-			    for (i=0; i<pcp->pc_head.totalblock; i++) {
+			    for (i=0; i<pcp->pc_desc.fs.totalblock; i++) {
 				if ((i & ((1<<v1p->v1_bitmap_factor)-1)) == 0) {
 				    v1p->v1_sumcount[i>>v1p->v1_bitmap_factor] =
 					nset;
@@ -256,16 +256,16 @@ v1_verify(pc_context_t *pcp)
 			    /*
 			     * Fixup device size...
 			     */
-			    i = pcp->pc_head.totalblock * 
-				pcp->pc_head.block_size;
-			    if (pcp->pc_head.device_size != i)
-				pcp->pc_head.device_size = i;
+			    i = pcp->pc_desc.fs.totalblock *
+				pcp->pc_desc.fs.block_size;
+			    if (pcp->pc_desc.fs.device_size != i)
+				pcp->pc_desc.fs.device_size = i;
 
 			    /*
 			     * Is the count of used blocks good?
 			     */
-			    if (pcp->pc_head.usedblocks != nset) {
-			        /* [2011-08]
+			    if (pcp->pc_desc.fs.usedblocks != nset) {
+				/* [2011-08]
 				 * What should we do in this case?  The old
 				 * version punted, thinking that it is an
 				 * inconsistency.  However, at the time of
@@ -280,7 +280,7 @@ v1_verify(pc_context_t *pcp)
 				error = EFAULT;
 #else	/* STRICT_HEADERS */
 				/* what?! - Fix it up silently. */
-				pcp->pc_head.usedblocks = nset;
+				pcp->pc_desc.fs.usedblocks = nset;
 #endif	/* STRICT_HEADERS */
 			    } 
 			    if (!error && pcp->pc_cf_handle) {
@@ -366,8 +366,8 @@ v1_seek(pc_context_t *pcp, u_int64_t blockno)
 static inline int64_t
 rblock2offset(pc_context_t *pcp, u_int64_t rbnum)
 {
-    return(sizeof(pcp->pc_head)+pcp->pc_head.totalblock+MAGIC_LEN+
-	   (rbnum*(pcp->pc_head.block_size+CRC_SIZE)));
+    return(sizeof(pcp->pc_desc) + pcp->pc_desc.fs.totalblock + MAGIC_LEN +
+	   (rbnum * (pcp->pc_desc.fs.block_size + CRC_SIZE)));
 }
 
 /*
@@ -433,14 +433,14 @@ v1_readblock(pc_context_t *pcp, void *buffer)
 				      SYSDEP_SEEK_RELATIVE, (u_int64_t *) NULL);
 		    (void) posix_read(pcp->pc_fd, &crc_ck, CRC_SIZE, &c_size);
 		}
-		(void) posix_read(pcp->pc_fd, buffer, pcp->pc_head.block_size,
+		(void) posix_read(pcp->pc_fd, buffer, pcp->pc_desc.fs.block_size,
 				  &r_size);
 		crc_ck = v1_crc32(v1p, crc_ck, buffer, r_size);
 		(void) posix_read(pcp->pc_fd, &crc_ck2, CRC_SIZE, &c_size);
 		/*
 		 * XXX - endian?
 		 */
-		if ((r_size != pcp->pc_head.block_size) ||
+		if ((r_size != pcp->pc_desc.fs.block_size) ||
 		    (c_size != CRC_SIZE) || (crc_ck != crc_ck2)) {
 		    error = EIO;
 		}
@@ -450,7 +450,7 @@ v1_readblock(pc_context_t *pcp, void *buffer)
 	    /*
 	     * If we're reading an invalid block, use the handy buffer.
 	     */
-	    memcpy(buffer, pcp->pc_ivblock, pcp->pc_head.block_size);
+	    memcpy(buffer, pcp->pc_ivblock, pcp->pc_desc.fs.block_size);
 	    error = 0;	/* This shouldn't be necessary... */
 	}
     }
@@ -500,8 +500,8 @@ v1_writeblock(pc_context_t *pcp, void *buffer)
 		    pcp->pc_flags |= PC_HAVE_CF_PATH;
 		}
 	    }
-	    error = cf_create(pcp->pc_cf_path, pcp->pc_head.block_size,
-			      pcp->pc_head.totalblock, &pcp->pc_cf_handle);
+	    error = cf_create(pcp->pc_cf_path, pcp->pc_desc.fs.block_size,
+			      pcp->pc_desc.fs.totalblock, &pcp->pc_cf_handle);
 	    if (!error) {
 		pcp->pc_flags |= (PC_HAVE_CFDEP|PC_CF_VERIFIED);
 	    }
@@ -632,9 +632,9 @@ partclone_verify(void *rp)
 	/*
 	 * Read the header.
 	 */
-	if (((error = posix_read(pcp->pc_fd, &pcp->pc_head,
-				 sizeof(pcp->pc_head), &r_size)) == 0) &&
-	    (r_size == sizeof(pcp->pc_head))) {
+	if (((error = posix_read(pcp->pc_fd, &pcp->pc_desc,
+				 sizeof(pcp->pc_desc), &r_size)) == 0) &&
+	    (r_size == sizeof(pcp->pc_desc))) {
 	    int veridx;
 	    int found = -1;
 
@@ -645,9 +645,9 @@ partclone_verify(void *rp)
 	    for (veridx = 0; 
 		 veridx < sizeof(version_table)/sizeof(version_table[0]);
 		 veridx++) {
-		if (memcmp(pcp->pc_head.version,
+		if (memcmp(pcp->pc_desc.head.version,
 			   version_table[veridx].version,
-			   sizeof(pcp->pc_head.version)) == 0) {
+			   sizeof(pcp->pc_desc.head.version)) == 0) {
 		    found = veridx;
 		    break;
 		}
@@ -673,9 +673,9 @@ partclone_verify(void *rp)
 			 */
 			if ((error =
 			     posix_malloc(&pcp->pc_ivblock,
-					  pcp->pc_head.block_size)) == 0) {
+					  pcp->pc_desc.fs.block_size)) == 0) {
 				memset(pcp->pc_ivblock, 69, 
-				       pcp->pc_head.block_size);
+				       pcp->pc_desc.fs.block_size);
 				pcp->pc_flags |= PC_HAVE_IVBLOCK;
 			}
 		    }
@@ -687,7 +687,7 @@ partclone_verify(void *rp)
 	    if (error == 0) 
 		/*
 		 * Implies:
-		 * (r_size != sizeof(pcp->pc_head)
+		 * (r_size != sizeof(pcp->pc_desc)
 		 */
 		error = EIO;
 	}
@@ -702,7 +702,7 @@ int64_t
 partclone_blocksize(void *rp)
 {
     pc_context_t *pcp = (pc_context_t *) rp;
-    return((PCTX_VERIFIED(pcp)) ? pcp->pc_head.block_size : -1);
+    return((PCTX_VERIFIED(pcp)) ? pcp->pc_desc.fs.block_size : -1);
 }
 
 /*
@@ -712,7 +712,7 @@ int64_t
 partclone_blockcount(void *rp)
 {
     pc_context_t *pcp = (pc_context_t *) rp;
-    return((PCTX_VERIFIED(pcp)) ? pcp->pc_head.totalblock : -1);
+    return((PCTX_VERIFIED(pcp)) ? pcp->pc_desc.fs.totalblock : -1);
 }
 
 /*
@@ -724,7 +724,7 @@ partclone_seek(void *rp, u_int64_t blockno)
     int error = EINVAL;
     pc_context_t *pcp = (pc_context_t *) rp;
 
-    if (PCTX_READREADY(pcp) && (blockno <= pcp->pc_head.totalblock)) {
+    if (PCTX_READREADY(pcp) && (blockno <= pcp->pc_desc.fs.totalblock)) {
 	/*
 	 * Use the version-specific seek routine to do the heavy lifting.
 	 */
@@ -767,7 +767,7 @@ partclone_readblocks(void *rp, void *buffer, u_int64_t nblocks)
 		break;
 	    }
 	    pcp->pc_curblock++;
-	    cbp += pcp->pc_head.block_size;
+	    cbp += pcp->pc_desc.fs.block_size;
 	}
     }
     return(error);
@@ -806,7 +806,7 @@ partclone_writeblocks(void *rp, void *buffer, u_int64_t nblocks)
 		break;
 	    }
 	    pcp->pc_curblock++;
-	    cbp += pcp->pc_head.block_size;
+	    cbp += pcp->pc_desc.fs.block_size;
 	}
     }
     return(error);

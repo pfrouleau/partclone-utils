@@ -31,21 +31,46 @@
 #define jfs_MAGIC "JFS"
 #define raw_MAGIC "raw"
 
+#define IMAGE_VERSION_SIZE 4
 #define IMAGE_VERSION "0001"
-#define VERSION_SIZE 4
 #define SECTOR_SIZE 512
 #define CRC_SIZE 4
 
-struct image_head 
+/* Disable fields alignment for struct stored in the image */
+#pragma pack(push, 1)
+
+typedef struct
 {
     char magic[IMAGE_MAGIC_SIZE];
     char fs[FS_MAGIC_SIZE];
-    char version[VERSION_SIZE];
+    char version[IMAGE_VERSION_SIZE];
+    char padding[2];
+
+} image_head_v1;
+
+typedef struct
+{
     int block_size;
     unsigned long long device_size;
     unsigned long long totalblock;
     unsigned long long usedblocks;
+
+} file_system_info_v1;
+
+typedef struct
+{
     char buff[4096];
+
+} image_options_v1;
+
+struct image_desc
+{
+	image_head_v1       head;
+	file_system_info_v1 fs;
+	image_options_v1    options;
 };
-typedef struct image_head image_head;
+typedef struct image_desc image_desc;
+
+#pragma pack(pop)
+
 #endif	/* _PARTCLONE_H_ */

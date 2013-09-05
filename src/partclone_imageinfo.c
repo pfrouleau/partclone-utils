@@ -37,7 +37,7 @@ typedef struct libpc_context {
     void		*pc_verdep;	/* Version-dependent handle */
     struct version_dispatch_table
 			*pc_dispatch;	/* Version-dependent dispatch */
-    image_head		pc_head;	/* Image header */
+    image_desc		pc_desc;	/* Image header */
     u_int64_t		pc_curblock;	/* Current position */
     u_int32_t		pc_flags;	/* Handle flags */
     sysdep_open_mode_t	pc_omode;	/* Open mode */
@@ -75,7 +75,7 @@ main(int argc, char *argv[])
 
 	if (dontcare && error)
 	  p->pc_flags |= 4;
-	for (bmi = 0; bmi < p->pc_head.totalblock; bmi++) {
+	for (bmi = 0; bmi < p->pc_desc.fs.totalblock; bmi++) {
 	  switch (v->v1_bitmap[bmi]) {
 	  case 0:
 	    unset++; break;
@@ -92,7 +92,7 @@ main(int argc, char *argv[])
 	  bmscanned++;
 	}
 	fprintf(stdout, "%s: %llu blocks, %llu blocks scanned, %llu unset, %llu set, %llu strange\n",
-		argv[i], p->pc_head.totalblock, bmscanned, unset, set, strange);
+		argv[i], p->pc_desc.fs.totalblock, bmscanned, unset, set, strange);
 	if ((iob = (unsigned char *) malloc(partclone_blocksize(pctx)))) {
 	  int *fd = (int *) p->pc_fd;
 	  off_t sblkpos;
