@@ -256,103 +256,96 @@ v1_verify(pc_context_t *pcp)
     int error = EINVAL;
 
     if (PCTX_OPEN(pcp)) {
+	v1_context_t *v1p = (v1_context_t *) pcp->pc_verdep;
 	/*
-	 * Verify the header magic.
+	 * Allocate and fill the bitmap.
 	 */
-	if (memcmp(pcp->pc_desc.head.magic, IMAGE_MAGIC, IMAGE_MAGIC_SIZE) == 0) {
-	    v1_context_t *v1p = (v1_context_t *) pcp->pc_verdep;
+	if ((error = posix_malloc(&v1p->v1_bitmap,
+		sizeof(unsigned char) * pcp->pc_desc.fs.totalblock)) == 0) {
+	    u_int64_t r_size;
 
-	    pcp->pc_flags |= PC_HEAD_VALID;
-	    /*
-	     * Allocate and fill the bitmap.
-	     */
-	    if ((error = posix_malloc(&v1p->v1_bitmap,
-		  sizeof(unsigned char) * pcp->pc_desc.fs.totalblock)) == 0) {
-		u_int64_t r_size;
-
-		(void) posix_seek(pcp->pc_fd, sizeof(image_desc_v1),
-				  SYSDEP_SEEK_ABSOLUTE, (u_int64_t *) NULL);
-		if (((error = posix_read(pcp->pc_fd, v1p->v1_bitmap,
-					 pcp->pc_desc.fs.totalblock,
-					 &r_size)) == 0) &&
+	    (void) posix_seek(pcp->pc_fd, sizeof(image_desc_v1),
+		    SYSDEP_SEEK_ABSOLUTE, (u_int64_t *) NULL);
+	    if (((error = posix_read(pcp->pc_fd, v1p->v1_bitmap,
+		    pcp->pc_desc.fs.totalblock,
+		    &r_size)) == 0) &&
 		    (r_size == pcp->pc_desc.fs.totalblock)) {
-		    char magicstr[MAGIC_LEN];
-		    /*
-		     * Finally look for the magic string.
-		     */
-		    if (((error = posix_read(pcp->pc_fd, magicstr,
-					     sizeof(magicstr), &r_size)) == 0) &&
+		char magicstr[MAGIC_LEN];
+		/*
+		 * Finally look for the magic string.
+		 */
+		if (((error = posix_read(pcp->pc_fd, magicstr,
+			sizeof(magicstr), &r_size)) == 0) &&
 			(r_size == sizeof(magicstr)) &&
 			(memcmp(magicstr, cmagicstr, sizeof(magicstr)) == 0)) {
-			if ((error = posix_malloc(&v1p->v1_sumcount,
-			      ((pcp->pc_desc.fs.totalblock >>
-				v1p->v1_bitmap_factor)+1) * 
-			      sizeof(u_int64_t))) == 0) {
-			    /*
-			     * Precalculate the count of preceding valid blocks
-			     * for every 1k blocks.
-			     */
-			    u_int64_t i, nset = 0;
-			    for (i=0; i<pcp->pc_desc.fs.totalblock; i++) {
-				if ((i & ((1<<v1p->v1_bitmap_factor)-1)) == 0) {
-				    v1p->v1_sumcount[i>>v1p->v1_bitmap_factor] =
+		    if ((error = posix_malloc(&v1p->v1_sumcount,
+			    ((pcp->pc_desc.fs.totalblock >>
+				    v1p->v1_bitmap_factor)+1) *
+				    sizeof(u_int64_t))) == 0) {
+			/*
+			 * Precalculate the count of preceding valid blocks
+			 * for every 1k blocks.
+			 */
+			u_int64_t i, nset = 0;
+			for (i=0; i<pcp->pc_desc.fs.totalblock; i++) {
+			    if ((i & ((1<<v1p->v1_bitmap_factor)-1)) == 0) {
+				v1p->v1_sumcount[i>>v1p->v1_bitmap_factor] =
 					nset;
-				}
-				/* [2011-08]
-				 * ...sigh... the *bitmap* can have more than
-				 * two values.  It can be 1, in which case it's
-				 * definitely in the file.  It can be zero
-				 * in which case, it's definitely not in the
-				 * file.  And it can be anything else that fits
-				 * into a byte?  What does it mean?  I don't
-				 * know.  But it's not set.
-				 */
-				if (v1p->v1_bitmap[i] == 1)
-				    nset++;
 			    }
-			    /*
-			     * Fixup device size...
+			    /* [2011-08]
+			     * ...sigh... the *bitmap* can have more than
+			     * two values.  It can be 1, in which case it's
+			     * definitely in the file.  It can be zero
+			     * in which case, it's definitely not in the
+			     * file.  And it can be anything else that fits
+			     * into a byte?  What does it mean?  I don't
+			     * know.  But it's not set.
 			     */
-			    i = pcp->pc_desc.fs.totalblock *
-				pcp->pc_desc.fs.block_size;
-			    if (pcp->pc_desc.fs.device_size != i)
-				pcp->pc_desc.fs.device_size = i;
-
-			    /*
-			     * Is the count of used blocks good?
-			     */
-			    if (pcp->pc_desc.fs.usedblocks != nset) {
-				/* [2011-08]
-				 * What should we do in this case?  The old
-				 * version punted, thinking that it is an
-				 * inconsistency.  However, at the time of
-				 * header construction it may not be possible
-				 * to get a definitive count of used blocks
-				 * without scanning the entire bitmap.  So
-				 * some filesystems use a derived count, which
-				 * can be off.  So, we don't turn on
-				 * STRICT_HEADERS (for now).
-				 */
-#ifdef	STRICT_HEADERS
-				error = EFAULT;
-#else	/* STRICT_HEADERS */
-				/* what?! - Fix it up silently. */
-				pcp->pc_desc.fs.usedblocks = nset;
-#endif	/* STRICT_HEADERS */
-			    } 
-			    if (!error && pcp->pc_cf_handle) {
-				/*
-				 * Verify the change file, if present.
-				 */
-				error = cf_verify(pcp->pc_cf_handle);
-				if (!error)
-				    pcp->pc_flags |= PC_CF_VERIFIED;
-			    }
+			    if (v1p->v1_bitmap[i] == 1)
+				nset++;
 			}
-		    } else {
-			if (error == 0)
-			    error = EINVAL;
+			/*
+			 * Fixup device size...
+			 */
+			i = pcp->pc_desc.fs.totalblock *
+				pcp->pc_desc.fs.block_size;
+			if (pcp->pc_desc.fs.device_size != i)
+			    pcp->pc_desc.fs.device_size = i;
+
+			/*
+			 * Is the count of used blocks good?
+			 */
+			if (pcp->pc_desc.fs.usedblocks != nset) {
+			    /* [2011-08]
+			     * What should we do in this case?  The old
+			     * version punted, thinking that it is an
+			     * inconsistency.  However, at the time of
+			     * header construction it may not be possible
+			     * to get a definitive count of used blocks
+			     * without scanning the entire bitmap.  So
+			     * some filesystems use a derived count, which
+			     * can be off.  So, we don't turn on
+			     * STRICT_HEADERS (for now).
+			     */
+#ifdef	STRICT_HEADERS
+			    error = EFAULT;
+#else	/* STRICT_HEADERS */
+			    /* what?! - Fix it up silently. */
+			    pcp->pc_desc.fs.usedblocks = nset;
+#endif	/* STRICT_HEADERS */
+			}
+			if (!error && pcp->pc_cf_handle) {
+			    /*
+			     * Verify the change file, if present.
+			     */
+			    error = cf_verify(pcp->pc_cf_handle);
+			    if (!error)
+				pcp->pc_flags |= PC_CF_VERIFIED;
+			}
 		    }
+		} else {
+		    if (error == 0)
+			error = EINVAL;
 		}
 	    }
 	}
@@ -694,64 +687,77 @@ partclone_verify(void *rp)
 	/*
 	 * Read the header.
 	 */
-	if (((error = posix_read(pcp->pc_fd, &pcp->pc_desc.head,
-				 sizeof(pcp->pc_desc.head), &r_size)) == 0) &&
-	    (r_size == sizeof(pcp->pc_desc))) {
+	error = posix_read(pcp->pc_fd, &pcp->pc_desc.head,
+			   sizeof(pcp->pc_desc.head), &r_size);
+	if ((error == 0) &&
+	    (r_size == sizeof(pcp->pc_desc.head))) {
 	    int veridx;
 	    int found = -1;
 
 	    /*
-	     * Scan through the version table and find a match for the
-	     * version string.
+	     * Verify the header magic.
 	     */
-	    for (veridx = 0; 
-		 veridx < sizeof(version_table)/sizeof(version_table[0]);
-		 veridx++) {
-		if (memcmp(pcp->pc_desc.head.version,
-			   version_table[veridx].version,
-			   sizeof(pcp->pc_desc.head.version)) == 0) {
-		    found = veridx;
-		    break;
-		}
-	    }
+	    if (memcmp(pcp->pc_desc.head.magic, IMAGE_MAGIC, IMAGE_MAGIC_SIZE) != 0) {
+		error = EINVAL;
+	    } else {
+		int veridx;
+		int found = -1;
 
-	    /*
-	     * See if we found a match.
-	     */
-	    if (found >= 0) {
-		pcp->pc_dispatch = (v_dispatch_table_t *) &version_table[found];
+		pcp->pc_flags |= PC_HEAD_VALID;
 		/*
-		 * Initialize the per-version handle.
+		 * Scan through the version table and find a match for the
+		 * version string.
 		 */
-		if (!(error = (*pcp->pc_dispatch->version_init)(pcp))) {
+		for (veridx = 0;
+		     veridx < sizeof(version_table)/sizeof(version_table[0]);
+		     veridx++) {
+		    if (memcmp(pcp->pc_desc.head.version,
+			       version_table[veridx].version,
+			       sizeof(pcp->pc_desc.head.version)) == 0) {
+			found = veridx;
+			break;
+		    }
+		}
+
+		/*
+		 * See if we found a match.
+		 */
+		if (found >= 0) {
+		    pcp->pc_dispatch = (v_dispatch_table_t *) &version_table[found];
 		    /*
-		     * Verify the version header.
+		     * Initialize the per-version handle.
 		     */
-		    if (!(error = (*pcp->pc_dispatch->version_verify)(pcp))) {
-			pcp->pc_flags |= PC_VERIFIED;
-			pcp->pc_curblock = 0;
+		    if (!(error = (*pcp->pc_dispatch->version_init)(pcp))) {
 			/*
-			 * Allocate a buffer for reading blocks
+			 * Verify the version header.
 			 */
-			if ((error =
-			     posix_malloc(&pcp->pc_ivblock,
-					  pcp->pc_desc.fs.block_size)) == 0) {
+			if (!(error = (*pcp->pc_dispatch->version_verify)(pcp))) {
+			    pcp->pc_flags |= PC_VERIFIED;
+			    pcp->pc_curblock = 0;
+			    /*
+			     * Allocate a buffer for reading blocks
+			     */
+			    if ((error =
+				posix_malloc(&pcp->pc_ivblock,
+					     pcp->pc_desc.fs.block_size)) == 0) {
 				memset(pcp->pc_ivblock, 69, 
 				       pcp->pc_desc.fs.block_size);
 				pcp->pc_flags |= PC_HAVE_IVBLOCK;
+			    }
 			}
 		    }
+		} else {
+		    error = ENOENT;
 		}
-	    } else {
-		error = ENOENT;
 	    }
-	} else {
-	    if (error == 0) 
-		/*
-		 * Implies:
-		 * (r_size != sizeof(pcp->pc_desc)
-		 */
-		error = EIO;
+	}
+    } else {
+	if (error == 0) {
+	    /*
+	     * Implies:
+	     * (r_size != sizeof(pcp->pc_desc)
+	     */
+	    error = EIO;
 	}
     }
     return(error);
