@@ -133,6 +133,60 @@ typedef struct version_1_context {
     u_int16_t		v1_bitmap_factor;	/* log2(entries)/index */
 } v1_context_t;
 
+
+void
+init_crc32_table(v1_context_t *v1p)
+{
+    int i;
+    for (i=0; i<CRC_TABLE_LEN; i++) {
+	int j;
+	unsigned long init_crc = (unsigned long) i;
+	for (j=0; j<CRC_UNIT_BITS; j++) {
+	    init_crc = (init_crc & 0x00000001L) ?
+		(init_crc >> 1) ^ 0xEDB88320L :
+		(init_crc >> 1);
+	}
+	v1p->v1_crc_tab32[i] = init_crc;
+    }
+    v1p->v1_bitmap_factor = V1_DEFAULT_FACTOR;
+}
+
+int
+init_omode(pc_context_t *pcp)
+{
+    int error = 0;
+
+    if (pcp->pc_cf_path &&
+	((int) pcp->pc_omode >= (int) SYSDEP_OPEN_RW) &&
+	((error = cf_init(pcp->pc_cf_path, pcp->pc_desc.fs.block_size,
+			  pcp->pc_desc.fs.totalblock,
+			  &pcp->pc_cf_handle)) == 0)) {
+	pcp->pc_flags |= PC_CF_OPEN;
+    } else {
+	if ((int) pcp->pc_omode < (int) SYSDEP_OPEN_RW)
+	    pcp->pc_flags |= PC_READ_ONLY;
+	else
+	    /*
+	     * Completely discard errors here.
+	     */
+	    error = 0;
+    }
+    return(error);
+}
+
+int
+alloc_v1_context(pc_context_t *pcp)
+{
+    int error;
+    v1_context_t *v1p;
+
+    if ((error = posix_malloc(&v1p, sizeof(*v1p))) == 0) {
+	memset(v1p, 0, sizeof(*v1p));
+	pcp->pc_verdep = v1p;
+	pcp->pc_flags |= (PC_HAVE_VERDEP|PC_VERSION_INIT);
+    }
+    return(error);
+}
 /*
  * v1_init	- Initialize version 1 file handling.
  *
@@ -144,7 +198,6 @@ v1_init(pc_context_t *pcp)
 {
     int error = EINVAL;
     u_int64_t r_size;
-    v1_context_t *v1p;
 
     if (PCTX_VALID(pcp)) {
 	/*
@@ -164,7 +217,7 @@ v1_init(pc_context_t *pcp)
 		pcp->pc_desc.fs.usedblocks = fs_v1.usedblocks;
 		strcpy(pcp->pc_desc.fs.fs, ((image_head_v1*)&(pcp->pc_desc.head))->fs);
 		/* options_v1 contains only zeros
-			   All v1 images uses the same options */
+		   All v1 images uses the same options */
 		pcp->pc_desc.options.image_version = 0x0001;
 		pcp->pc_desc.options.checksum_mode = CSM_CRC32_0001;
 		pcp->pc_desc.options.checksum_size = CRC32_SIZE;
@@ -176,51 +229,16 @@ v1_init(pc_context_t *pcp)
 		memset(&pcp->pc_desc.head.ptc_version, 0,
 			sizeof(pcp->pc_desc.head.ptc_version));
 		pcp->pc_desc.head.endianess = 0;
+
+		if ((error = alloc_v1_context(pcp)) == 0 &&
+		    (error = init_omode(pcp)) == 0) {
+		    init_crc32_table(pcp->pc_verdep);
+		}
 	    } else {
 		error = EIO;
 	    }
 	} else {
 	    error = EIO;
-	}
-	if (error)
-	    return(error);
-
-	if ((error = posix_malloc(&v1p, sizeof(*v1p))) == 0) {
-	    int i;
-	    memset(v1p, 0, sizeof(*v1p));
-	    pcp->pc_verdep = v1p;
-	    pcp->pc_flags |= (PC_HAVE_VERDEP|PC_VERSION_INIT);
-
-	    if (pcp->pc_cf_path && 
-		((int) pcp->pc_omode >= (int) SYSDEP_OPEN_RW) &&
-		((error = cf_init(pcp->pc_cf_path,
-				  pcp->pc_desc.fs.block_size,
-				  pcp->pc_desc.fs.totalblock,
-				  &pcp->pc_cf_handle)) == 0)) {
-		pcp->pc_flags |= PC_CF_OPEN;
-	    } else {
-		if ((int) pcp->pc_omode < (int) SYSDEP_OPEN_RW)
-		    pcp->pc_flags |= PC_READ_ONLY;
-		else
-		    /*
-		     * Completely discard errors here.
-		     */
-		    error = 0;
-	    }
-	    /*
-	     * Initialize the CRC table.
-	     */
-	    for (i=0; i<CRC_TABLE_LEN; i++) {
-		int j;
-		unsigned long init_crc = (unsigned long) i;
-		for (j=0; j<CRC_UNIT_BITS; j++) {
-		    init_crc = (init_crc & 0x00000001L) ?
-			(init_crc >> 1) ^ 0xEDB88320L :
-			(init_crc >> 1);
-		}
-		v1p->v1_crc_tab32[i] = init_crc;
-	    }
-	    v1p->v1_bitmap_factor = V1_DEFAULT_FACTOR;
 	}
     }
     return(error);
