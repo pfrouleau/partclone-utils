@@ -1,0 +1,10 @@
+.deps/
+imagemount
+libntfstest
+libpctest
+Makefile
+Makefile.in
+ntfsclone_imageinfo
+partclone_imageinfo
+*.a
+*.o
