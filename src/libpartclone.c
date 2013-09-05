@@ -53,7 +53,7 @@ typedef struct libpc_context {
     void		*pc_verdep;	/* Version-dependent handle */
     struct version_dispatch_table
 			*pc_dispatch;	/* Version-dependent dispatch */
-    image_desc		pc_desc;	/* Image desc */
+    image_desc_v2	pc_desc;	/* Image desc */
     u_int64_t		pc_curblock;	/* Current position */
     u_int32_t		pc_flags;	/* Handle flags */
     sysdep_open_mode_t	pc_omode;	/* Open mode */
@@ -143,9 +143,48 @@ static int
 v1_init(pc_context_t *pcp)
 {
     int error = EINVAL;
+    u_int64_t r_size;
     v1_context_t *v1p;
 
     if (PCTX_VALID(pcp)) {
+	/*
+	 * Read image details
+	 */
+	file_system_info_v1 fs_v1;
+	image_options_v1 options_v1;
+
+	error = posix_read(pcp->pc_fd, &fs_v1, sizeof(fs_v1), &r_size);
+	if (error == 0 && r_size == sizeof(fs_v1)) {
+	    error = posix_read(pcp->pc_fd, &options_v1,
+			       sizeof(options_v1), &r_size);
+	    if (error == 0 && r_size == sizeof(options_v1)) {
+		pcp->pc_desc.fs.block_size = fs_v1.block_size;
+		pcp->pc_desc.fs.device_size = fs_v1.device_size;
+		pcp->pc_desc.fs.totalblock = fs_v1.totalblock;
+		pcp->pc_desc.fs.usedblocks = fs_v1.usedblocks;
+		strcpy(pcp->pc_desc.fs.fs, ((image_head_v1*)&(pcp->pc_desc.head))->fs);
+		/* options_v1 contains only zeros
+			   All v1 images uses the same options */
+		pcp->pc_desc.options.image_version = 0x0001;
+		pcp->pc_desc.options.checksum_mode = CSM_CRC32_0001;
+		pcp->pc_desc.options.checksum_size = CRC32_SIZE;
+		pcp->pc_desc.options.blocks_per_checksum = 1;
+		pcp->pc_desc.options.reseed_checksum = 0;
+		pcp->pc_desc.options.bitmap_mode = BM_BYTE;
+		/* cleanup head to make it "v2"-like */
+		pcp->pc_desc.head.magic[IMAGE_MAGIC_SIZE] = 0;
+		memset(&pcp->pc_desc.head.ptc_version, 0,
+			sizeof(pcp->pc_desc.head.ptc_version));
+		pcp->pc_desc.head.endianess = 0;
+	    } else {
+		error = EIO;
+	    }
+	} else {
+	    error = EIO;
+	}
+	if (error)
+	    return(error);
+
 	if ((error = posix_malloc(&v1p, sizeof(*v1p))) == 0) {
 	    int i;
 	    memset(v1p, 0, sizeof(*v1p));
@@ -213,7 +252,7 @@ v1_verify(pc_context_t *pcp)
 		  sizeof(unsigned char) * pcp->pc_desc.fs.totalblock)) == 0) {
 		u_int64_t r_size;
 
-		(void) posix_seek(pcp->pc_fd, sizeof(pcp->pc_desc),
+		(void) posix_seek(pcp->pc_fd, sizeof(image_desc_v1),
 				  SYSDEP_SEEK_ABSOLUTE, (u_int64_t *) NULL);
 		if (((error = posix_read(pcp->pc_fd, v1p->v1_bitmap,
 					 pcp->pc_desc.fs.totalblock,
@@ -366,8 +405,8 @@ v1_seek(pc_context_t *pcp, u_int64_t blockno)
 static inline int64_t
 rblock2offset(pc_context_t *pcp, u_int64_t rbnum)
 {
-    return(sizeof(pcp->pc_desc) + pcp->pc_desc.fs.totalblock + MAGIC_LEN +
-	   (rbnum * (pcp->pc_desc.fs.block_size + CRC_SIZE)));
+    return(sizeof(image_desc_v1) + pcp->pc_desc.fs.totalblock + MAGIC_LEN +
+	   (rbnum * (pcp->pc_desc.fs.block_size + pcp->pc_desc.options.checksum_size)));
 }
 
 /*
@@ -429,19 +468,24 @@ v1_readblock(pc_context_t *pcp, void *buffer)
 		 * starting checksum for this block.
 		 */
 		if (v1p->v1_nvbcount) {
-		    (void) posix_seek(pcp->pc_fd, -CRC_SIZE,
+		    (void) posix_seek(pcp->pc_fd,
+				      -pcp->pc_desc.options.checksum_size,
 				      SYSDEP_SEEK_RELATIVE, (u_int64_t *) NULL);
-		    (void) posix_read(pcp->pc_fd, &crc_ck, CRC_SIZE, &c_size);
+		    (void) posix_read(pcp->pc_fd, &crc_ck,
+				      pcp->pc_desc.options.checksum_size,
+				      &c_size);
 		}
 		(void) posix_read(pcp->pc_fd, buffer, pcp->pc_desc.fs.block_size,
 				  &r_size);
 		crc_ck = v1_crc32(v1p, crc_ck, buffer, r_size);
-		(void) posix_read(pcp->pc_fd, &crc_ck2, CRC_SIZE, &c_size);
+		(void) posix_read(pcp->pc_fd, &crc_ck2,
+				  pcp->pc_desc.options.checksum_size, &c_size);
 		/*
 		 * XXX - endian?
 		 */
 		if ((r_size != pcp->pc_desc.fs.block_size) ||
-		    (c_size != CRC_SIZE) || (crc_ck != crc_ck2)) {
+		    (c_size != pcp->pc_desc.options.checksum_size) ||
+		    (crc_ck != crc_ck2)) {
 		    error = EIO;
 		}
 		v1p->v1_nvbcount++;
@@ -632,8 +676,8 @@ partclone_verify(void *rp)
 	/*
 	 * Read the header.
 	 */
-	if (((error = posix_read(pcp->pc_fd, &pcp->pc_desc,
-				 sizeof(pcp->pc_desc), &r_size)) == 0) &&
+	if (((error = posix_read(pcp->pc_fd, &pcp->pc_desc.head,
+				 sizeof(pcp->pc_desc.head), &r_size)) == 0) &&
 	    (r_size == sizeof(pcp->pc_desc))) {
 	    int veridx;
 	    int found = -1;

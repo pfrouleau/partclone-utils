@@ -26,7 +26,6 @@
 #include "partclone.h"
 #define	CRC_UNIT_BITS	8
 #define	CRC_TABLE_LEN	(1<<CRC_UNIT_BITS)
-#define	CRC_SIZE	4
 
 typedef struct libpc_context {
     void		*pc_fd;		/* File handle */
@@ -37,7 +36,7 @@ typedef struct libpc_context {
     void		*pc_verdep;	/* Version-dependent handle */
     struct version_dispatch_table
 			*pc_dispatch;	/* Version-dependent dispatch */
-    image_desc		pc_desc;	/* Image header */
+    image_desc_v2	pc_desc;	/* Image header */
     u_int64_t		pc_curblock;	/* Current position */
     u_int32_t		pc_flags;	/* Handle flags */
     sysdep_open_mode_t	pc_omode;	/* Open mode */
@@ -101,16 +100,16 @@ main(int argc, char *argv[])
 	  error = partclone_seek(pctx, 0);
 	  error = partclone_readblocks(pctx, iob, 1);
 	  sblkpos = lseek(*fd, 0, SEEK_CUR);
-	  sblkpos -= (partclone_blocksize(pctx) + CRC_SIZE);
+	  sblkpos -= (partclone_blocksize(pctx) + p->pc_desc.options.checksum_size);
 	  fstat(*fd, &sbuf);
 	  fsize = sbuf.st_size;
 	  fprintf(stdout, "%s: size is %lld bytes, blocks (%lld bytes) start at %lld: ",
 		  argv[i], (long long) fsize, (long long) partclone_blocksize(pctx), (long long) sblkpos);
 	  fsize -= sblkpos;
 	  fprintf(stdout, " %lld blocks written",
-		  fsize / (partclone_blocksize(pctx) + CRC_SIZE));
-	  if (fsize % (partclone_blocksize(pctx) + CRC_SIZE)) {
-	    fprintf(stdout, ": %lld byte trailer\n", fsize % (partclone_blocksize(pctx) + CRC_SIZE));
+		  fsize / (partclone_blocksize(pctx) + p->pc_desc.options.checksum_size));
+	  if (fsize % (partclone_blocksize(pctx) + p->pc_desc.options.checksum_size)) {
+	    fprintf(stdout, ": %lld byte trailer\n", fsize % (partclone_blocksize(pctx) + p->pc_desc.options.checksum_size));
 	  } else {
 	    fprintf(stdout, "\n");
 	  }
@@ -125,7 +124,7 @@ main(int argc, char *argv[])
 			argv[i]);
 	      } else {
 		fprintf(stderr, "%s: position after last block = %lld, eof position = %lld, blocksize = %lld\n",
-			argv[i], cpos, eofpos, partclone_blocksize(pctx) + CRC_SIZE);
+			argv[i], cpos, eofpos, partclone_blocksize(pctx) + p->pc_desc.options.checksum_size);
 		anomalies++;
 	      }
 	    } else {
