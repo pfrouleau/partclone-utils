@@ -60,26 +60,26 @@ main(int argc, char *argv[])
 		    ssize_t nbout = write(ofd, iobuf, bsize);
 		    if (nbout != bsize) {
 		      error = (nbout < 0) ? errno : EIO;
-		      printf("%s: write error %d at block %ld\n",
+		      printf("%s: write error %d at block %d\n",
 			     outfile, error, ci);
 		      break;
 		    } else {
 		      nwritten++;
 		    }
 		  } else {
-		    printf("%s: read error %d at block %ld\n",
+		    printf("%s: read error %d at block %d\n",
 			   argv[i], error, ci);
 		    break;
 		  }
 		} else {
 		  error = errno;
-		  printf("%s: seek error %d at block %ld\n", 
+		  printf("%s: seek error %d at block %d\n",
 			 outfile, error, ci);
 		  break;
 		}
 	      } else if (blkstat != 0) {
 		error = EIO;
-		printf("%s: block %ld status %d\n", argv[i], ci, blkstat);
+		printf("%s: block %d status %d\n", argv[i], ci, blkstat);
 		break;
 	      } else {
 		if ((blkstat == 0) && (freeblock == 0))
@@ -87,7 +87,7 @@ main(int argc, char *argv[])
 		nskipped++;
 	      }
 	    } else {
-	      printf("%s: seek error %d at block %ld\n", argv[i], error, ci);
+	      printf("%s: seek error %d at block %d\n", argv[i], error, ci);
 	      break;
 	    }
 	  }
@@ -97,7 +97,7 @@ main(int argc, char *argv[])
 	  } else {
 	    printf("%s: bad: ", outfile);
 	  }
-	  printf("%ld blocks, %ld done, %ld written, %ld skipped\n",
+	  printf("%d blocks, %d done, %d written, %d skipped\n",
 		 btotal, ntotal, nwritten, nskipped);
 	  /*
 	   * test writing...
@@ -110,7 +110,7 @@ main(int argc, char *argv[])
 	      memcpy(&iobuf[iooffset], iostring, strlen(iostring));
 	      if ((error = partclone_seek(pctx, freeblock)) == 0) {
 		  if ((error = partclone_writeblocks(pctx, iobuf, 1)) == 0) {
-		      printf("write test success! wrote \"%s\" to block %ld offset %d\n",
+		      printf("write test success! wrote \"%s\" to block %lld offset %lld\n",
 			     iostring, freeblock, iooffset);
 		      /*
 		       * Now read it back.

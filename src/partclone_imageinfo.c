@@ -86,14 +86,14 @@ main(int argc, char *argv[])
 	  default:
 	    strange++;
 	    laststrange = bmi;
-	    fprintf(stderr, "%s: block %lld (0x%016llx) bitmap %d (0x%02x)?\n", argv[i], bmi, bmi,
+	    fprintf(stderr, "%s: block %llu (0x%016llx) bitmap %d (0x%02x)?\n", argv[i], bmi, bmi,
 		    v->v1_bitmap[bmi], v->v1_bitmap[bmi]);
 	    anomalies++;
 	    break;
 	  }
 	  bmscanned++;
 	}
-	fprintf(stdout, "%s: %lld blocks, %lld blocks scanned, %lld unset, %lld set, %lld strange\n",
+	fprintf(stdout, "%s: %llu blocks, %llu blocks scanned, %llu unset, %llu set, %llu strange\n",
 		argv[i], p->pc_head.totalblock, bmscanned, unset, set, strange);
 	if ((iob = (unsigned char *) malloc(partclone_blocksize(pctx)))) {
 	  int *fd = (int *) p->pc_fd;
@@ -109,10 +109,10 @@ main(int argc, char *argv[])
 	  fprintf(stdout, "%s: size is %lld bytes, blocks (%lld bytes) start at %lld: ",
 		  argv[i], (long long) fsize, (long long) partclone_blocksize(pctx), (long long) sblkpos);
 	  fsize -= sblkpos;
-	  fprintf(stdout, " %d blocks written",
+	  fprintf(stdout, " %lld blocks written",
 		  fsize / (partclone_blocksize(pctx) + CRC_SIZE));
 	  if (fsize % (partclone_blocksize(pctx) + CRC_SIZE)) {
-	    fprintf(stdout, ": %d byte trailer\n", fsize % (partclone_blocksize(pctx) + CRC_SIZE));
+	    fprintf(stdout, ": %lld byte trailer\n", fsize % (partclone_blocksize(pctx) + CRC_SIZE));
 	  } else {
 	    fprintf(stdout, "\n");
 	  }
@@ -131,12 +131,12 @@ main(int argc, char *argv[])
 		anomalies++;
 	      }
 	    } else {
-	      fprintf(stderr, "%s: cannot read block %lld, error = %d\n",
+	      fprintf(stderr, "%s: cannot read block %llu, error = %d\n",
 		      argv[i], lastset, error);
 	      anomalies++;
 	    }
 	  } else {
-	    fprintf(stderr, "%s: cannot seek to block %lld, error = %d\n",
+	    fprintf(stderr, "%s: cannot seek to block %llu, error = %d\n",
 		    argv[i], lastset, error);
 	    anomalies++;
 	  }
