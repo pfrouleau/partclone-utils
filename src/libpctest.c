@@ -14,7 +14,7 @@
  *
  */
 #ifdef	HAVE_CONFIG_H
-#include <config.h>
+#include "config.h"
 #endif	/* HAVE_CONFIG_H */
 #include <sys/types.h>
 #include <unistd.h>
@@ -24,8 +24,8 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
-#include <libpartclone.h>
-#include <sysdep_posix.h>
+#include "libpartclone.h"
+#include "sysdep_posix.h"
 
 int
 main(int argc, char *argv[])

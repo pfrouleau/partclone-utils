@@ -11,7 +11,7 @@
  *
  */
 #ifdef	HAVE_CONFIG_H
-#include <config.h>
+#include "config.h"
 #endif	/* HAVE_CONFIG_H */
 #include <sys/types.h>
 #include <unistd.h>
@@ -21,9 +21,9 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
-#include <libntfsclone.h>
-#include <sysdep_posix.h>
-#include <ntfsclone.h>
+#include "libntfsclone.h"
+#include "sysdep_posix.h"
+#include "ntfsclone.h"
 
 typedef struct libntfsclone_context {
     void		*nc_fd;		/* File handle */

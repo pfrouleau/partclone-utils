@@ -11,7 +11,7 @@
  *
  */
 #ifdef	HAVE_CONFIG_H
-#include <config.h>
+#include "config.h"
 #endif	/* HAVE_CONFIG_H */
 #include <sys/types.h>
 #include <unistd.h>
@@ -21,9 +21,9 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
-#include <libpartclone.h>
-#include <sysdep_posix.h>
-#include <partclone.h>
+#include "libpartclone.h"
+#include "sysdep_posix.h"
+#include "partclone.h"
 #define	CRC_UNIT_BITS	8
 #define	CRC_TABLE_LEN	(1<<CRC_UNIT_BITS)
 #define	CRC_SIZE	4

@@ -11,9 +11,9 @@
  *
  */
 #include <errno.h>
-#include <libimage.h>
-#include <libntfsclone.h>
-#include <libpartclone.h>
+#include "libimage.h"
+#include "libntfsclone.h"
+#include "libpartclone.h"
 
 extern image_dispatch_t partclone_image_type;
 extern image_dispatch_t ntfsclone_image_type;

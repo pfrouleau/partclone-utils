@@ -17,7 +17,7 @@
 #ifndef	_LIBPARTCLONE_H_
 #define	_LIBPARTCLONE_H_	1
 #include <sys/types.h>
-#include <sysdep_int.h>
+#include "sysdep_int.h"
 
 #define	MAGIC_LEN	8
 
