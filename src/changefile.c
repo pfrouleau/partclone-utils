@@ -18,6 +18,7 @@
 #include <errno.h>
 #include <string.h>
 #include "changefile.h"
+#include "sysdep_posix.h"
 
 #define	CRC_UNIT_BITS	8
 #define	CRC_TABLE_LEN	(1<<CRC_UNIT_BITS)
@@ -42,7 +43,6 @@ typedef struct change_file_header {
 
 typedef struct change_file_context {
     cf_header_t	cfc_header;
-    const sysdep_dispatch_t *cfc_sysdep;
     void	*cfc_fd;
     u_int64_t	*cfc_blockmap;
     u_int64_t	cfc_blocksize;
@@ -68,22 +68,19 @@ static const char cf_name_append[] = ".cf";
  * Allocate and initialize change file handle.
  */
 int
-cf_init(const char *cfpath, const sysdep_dispatch_t *sysdep, 
-	u_int64_t blocksize, u_int64_t blockcount, void **cfpp)
+cf_init(const char *cfpath, u_int64_t blocksize, u_int64_t blockcount, void **cfpp)
 {
     int error = EINVAL;
     cf_context_t *cfp = (cf_context_t *) NULL;
 
-    if ((error = (*sysdep->sys_malloc)(&cfp, sizeof(*cfp))) == 0) {
+    if ((error = posix_malloc(&cfp, sizeof(*cfp))) == 0) {
 	int i;
 	memset(cfp, 0, sizeof(*cfp));
 
 	/*
 	 * Open the file.
 	 */
-	if ((error = (*sysdep->sys_open)(&cfp->cfc_fd, cfpath, SYSDEP_OPEN_RW)) 
-	    == 0) {
-	    cfp->cfc_sysdep = sysdep;
+	if ((error = posix_open(&cfp->cfc_fd, cfpath, SYSDEP_OPEN_RW)) == 0) {
 	    cfp->cfc_blocksize = blocksize;
 	    cfp->cfc_blockcount = blockcount;
 	    /*
@@ -100,7 +97,7 @@ cf_init(const char *cfpath, const sysdep_dispatch_t *sysdep,
 		cfp->cfc_crc_tab32[i] = init_crc;
 	    }
 	} else {
-	    (void) (*sysdep->sys_free)(cfp);
+	    (void) posix_free(cfp);
 	    cfp = (cf_context_t *) NULL;
 	}
     }
@@ -124,14 +121,9 @@ cf_verify(void *vcp)
     /*
      * Make sure we're at the beginning of the file.
      */
-    (void) (*cfp->cfc_sysdep->sys_seek)(cfp->cfc_fd,
-					0,
-					SYSDEP_SEEK_ABSOLUTE,
-					(u_int64_t *) NULL);
-    if (((error = (*cfp->cfc_sysdep->sys_read)(cfp->cfc_fd,
-					       &cfp->cfc_header,
-					       sizeof(cfp->cfc_header),
-					       &nread)) == 0) &&
+    (void) posix_seek(cfp->cfc_fd, 0, SYSDEP_SEEK_ABSOLUTE, (u_int64_t *) NULL);
+    if (((error = posix_read(cfp->cfc_fd, &cfp->cfc_header,
+			     sizeof(cfp->cfc_header), &nread)) == 0) &&
 	(nread == sizeof(cfp->cfc_header))) {
 	/*
 	 * Verify read header.
@@ -144,20 +136,13 @@ cf_verify(void *vcp)
 	    /*
 	     * Allocate, find and read the blockmap.
 	     */
-	    if ((error = 
-		 (*cfp->cfc_sysdep->sys_malloc)(&cfp->cfc_blockmap, bhsize))
-		== 0) {
-		if ((error = (*cfp->cfc_sysdep->sys_seek)(cfp->cfc_fd,
-							  cfp->cfc_header.
-							  cf_blockmap_offset,
-							  SYSDEP_SEEK_ABSOLUTE,
-							  (u_int64_t *) NULL)
+	    if ((error =  posix_malloc(&cfp->cfc_blockmap, bhsize)) == 0) {
+		if ((error = posix_seek(cfp->cfc_fd,
+					cfp->cfc_header.cf_blockmap_offset,
+					SYSDEP_SEEK_ABSOLUTE, (u_int64_t *) NULL)
 			) == 0) {
-		    if (((error =
-			  (*cfp->cfc_sysdep->sys_read)(cfp->cfc_fd,
-						       cfp->cfc_blockmap,
-						       bhsize,
-						       &nread)) == 0) &&
+		    if (((error = posix_read(cfp->cfc_fd, cfp->cfc_blockmap,
+					     bhsize, &nread)) == 0) &&
 			(nread == bhsize)) {
 			/* xxx */
 		    } else {
@@ -182,8 +167,7 @@ cf_verify(void *vcp)
  * cf_create	- Create change file if necessary.
  */
 int
-cf_create(const char *cfpath, const sysdep_dispatch_t *sysdep,
-	  u_int64_t blocksize, u_int64_t blockcount, void **cfpp)
+cf_create(const char *cfpath, u_int64_t blocksize, u_int64_t blockcount, void **cfpp)
 {
     int error;
     void *cfh = (void *) NULL;
@@ -191,11 +175,11 @@ cf_create(const char *cfpath, const sysdep_dispatch_t *sysdep,
     /*
      * First try to open an existing change file.
      */
-    if ((error = (*sysdep->sys_open)(&cfh, cfpath, SYSDEP_OPEN_RW)) != 0) {
+    if ((error = posix_open(&cfh, cfpath, SYSDEP_OPEN_RW)) != 0) {
 	/*
 	 * Open failed - try to create it.
 	 */
-	if ((error = (*sysdep->sys_open)(&cfh,cfpath, SYSDEP_CREATE)) == 0) {
+	if ((error = posix_open(&cfh, cfpath, SYSDEP_CREATE)) == 0) {
 	    cf_header_t ncfh;
 	    u_int64_t *bmp;
 	    /*
@@ -208,28 +192,19 @@ cf_create(const char *cfpath, const sysdep_dispatch_t *sysdep,
 	    ncfh.cf_used_blocks = 0;
 	    ncfh.cf_blockmap_offset = sizeof(ncfh);
 	    ncfh.cf_magic2 = CF_MAGIC_2;
-	    if ((error = (*sysdep->sys_malloc)(&bmp, 
-					       blockcount * 
-					       sizeof(u_int64_t))) 
-		== 0) {
+	    if ((error = posix_malloc(&bmp, blockcount * sizeof(u_int64_t))) == 0) {
 		u_int64_t nwritten;
 		memset(bmp, 0, blockcount * sizeof(u_int64_t));
-		if (((error = (*sysdep->sys_write)(cfh,
-						   &ncfh,
-						   sizeof(ncfh),
-						   &nwritten)) == 0) &&
+		if (((error = posix_write(cfh, &ncfh, sizeof(ncfh),
+					  &nwritten)) == 0) &&
 		    (nwritten == sizeof(ncfh)) &&
-		    ((error = (*sysdep->sys_write)(cfh,
-						   bmp,
-						   blockcount *
-						   sizeof(u_int64_t),
-						   &nwritten))
-		     == 0) &&
+		    ((error = posix_write(cfh, bmp,
+			    blockcount * sizeof(u_int64_t), &nwritten)) == 0) &&
 		    (nwritten == (blockcount * sizeof(u_int64_t)))) {
 		    /* close it - we'll open it again below. */
-		    (void) (*sysdep->sys_close)(cfh);
+		    (void) posix_close(cfh);
 		}
-		(void) (*sysdep->sys_free)(bmp);
+		(void) posix_free(bmp);
 	    }
 	}
     }
@@ -238,8 +213,7 @@ cf_create(const char *cfpath, const sysdep_dispatch_t *sysdep,
 	 * If we are successful thus far, then we have a
 	 * candidate change file.
 	 */
-	if ((error = cf_init(cfpath, sysdep, 
-			     blocksize, blockcount, cfpp)) == 0) {
+	if ((error = cf_init(cfpath, blocksize, blockcount, cfpp)) == 0) {
 	    error = cf_verify(*cfpp);
 	}
     }
@@ -261,25 +235,16 @@ cf_sync(void *vcp)
     /*
      * Seek and write the sanitized header and block map.
      */
-    if (((error = (*cfp->cfc_sysdep->sys_seek)(cfp->cfc_fd,
-					       0,
-					       SYSDEP_SEEK_ABSOLUTE,
-					       (u_int64_t *) NULL)) == 0) &&
-	((error = (*cfp->cfc_sysdep->sys_write)(cfp->cfc_fd,
-						&oheader,
-						sizeof(oheader),
-						&nwritten)) == 0) &&
+    if (((error = posix_seek(cfp->cfc_fd, 0, SYSDEP_SEEK_ABSOLUTE,
+			     (u_int64_t *) NULL)) == 0) &&
+	((error = posix_write(cfp->cfc_fd, &oheader,
+			      sizeof(oheader), &nwritten)) == 0) &&
 	(nwritten == sizeof(oheader)) &&
-	((error = (*cfp->cfc_sysdep->sys_seek)(cfp->cfc_fd,
-					       oheader.
-					       cf_blockmap_offset,
-					       SYSDEP_SEEK_ABSOLUTE,
-					       (u_int64_t *) NULL))  == 0) &&
-	((error = (*cfp->cfc_sysdep->sys_write)(cfp->cfc_fd,
-						cfp->cfc_blockmap,
-						oheader.cf_total_blocks *
-						sizeof(u_int64_t),
-						&nwritten)) == 0) &&
+	((error = posix_seek(cfp->cfc_fd, oheader.cf_blockmap_offset,
+			     SYSDEP_SEEK_ABSOLUTE, (u_int64_t *) NULL))  == 0) &&
+	((error = posix_write(cfp->cfc_fd, cfp->cfc_blockmap,
+			      oheader.cf_total_blocks * sizeof(u_int64_t),
+			      &nwritten)) == 0) &&
 	(nwritten == (oheader.cf_total_blocks * sizeof(u_int64_t)))) {
 	/*
 	 * If successful, then we're no longer dirty.
@@ -305,8 +270,8 @@ cf_finish(void *vcp)
     if (cfp->cfc_header.cf_flags & CF_HEADER_DIRTY)
 	(void) cf_sync(vcp);
     if (cfp->cfc_blockmap)
-	(void) (*cfp->cfc_sysdep->sys_free)(cfp->cfc_blockmap);
-    return((*cfp->cfc_sysdep->sys_free)(cfp));
+	(void) posix_free(cfp->cfc_blockmap);
+    return(posix_free(cfp));
 }
 
 /*
@@ -356,24 +321,16 @@ cf_readblock(void *vcp, void *buffer)
 	/*
 	 * If present, seek and read the block and trailer.
 	 */
-	if ((error = (*cfp->cfc_sysdep->sys_seek)(cfp->cfc_fd,
-						  cfp->cfc_blockmap
-						  [cfp->cfc_curpos],
-						  SYSDEP_SEEK_ABSOLUTE,
-						  (u_int64_t *) NULL)) == 0) {
+	if ((error = posix_seek(cfp->cfc_fd, cfp->cfc_blockmap[cfp->cfc_curpos],
+				SYSDEP_SEEK_ABSOLUTE, (u_int64_t *) NULL)) == 0) {
 	    u_int64_t rsize = cfp->cfc_blocksize;
 	    cf_block_trailer_t btrail;
 	    u_int64_t nread;
-	    if (((error = (*cfp->cfc_sysdep->sys_read)(cfp->cfc_fd,
-						       buffer,
-						       rsize,
-						       &nread)) == 0) &&
+	    if (((error = posix_read(cfp->cfc_fd, buffer, rsize, &nread)) == 0) &&
 		(nread == rsize)) {
 		rsize = sizeof(cf_block_trailer_t);
-		if (((error = (*cfp->cfc_sysdep->sys_read)(cfp->cfc_fd,
-							   &btrail,
-							   rsize,
-							   &nread)) == 0) &&
+		if (((error =
+			posix_read(cfp->cfc_fd, &btrail, rsize, &nread)) == 0) &&
 		    (nread == rsize)) {
 		    /*
 		     * Verify the trailer.
@@ -425,26 +382,20 @@ cf_writeblock(void *vcp, void *buffer)
     u_int64_t nbloffs = cfp->cfc_blockmap[cfp->cfc_curpos];
     u_int64_t curpos;
 
-    if ((error = (*cfp->cfc_sysdep->sys_seek)(cfp->cfc_fd,
-					      nbloffs,
-					      (nbloffs) ?
-					      SYSDEP_SEEK_ABSOLUTE :
-					      SYSDEP_SEEK_END,
-					      &curpos)) == 0) {
+    if ((error =
+	    posix_seek(cfp->cfc_fd, nbloffs,
+		       (nbloffs) ? SYSDEP_SEEK_ABSOLUTE : SYSDEP_SEEK_END,
+		       &curpos)) == 0) {
 	cf_block_trailer_t btrail = { cfp->cfc_curpos, 
 				      cf_crc32(cfp, 0, buffer,
 					       cfp->cfc_blocksize), 
 				      CF_MAGIC_3 };
 	u_int64_t nwritten;
-	if (((error = (*cfp->cfc_sysdep->sys_write)(cfp->cfc_fd,
-						    buffer,
-						    cfp->cfc_blocksize,
-						    &nwritten)) == 0) &&
+	if (((error = posix_write(cfp->cfc_fd, buffer, cfp->cfc_blocksize,
+				  &nwritten)) == 0) &&
 	    (nwritten == cfp->cfc_blocksize) &&
-	    ((error = (*cfp->cfc_sysdep->sys_write)(cfp->cfc_fd,
-						    &btrail,
-						    sizeof(btrail),
-						    &nwritten)) == 0) &&
+	    ((error = posix_write(cfp->cfc_fd, &btrail, sizeof(btrail),
+				  &nwritten)) == 0) &&
 	    (nwritten == sizeof(btrail))) {
 	    /*
 	     * Write success.

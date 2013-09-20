@@ -13,8 +13,7 @@
 
 #ifndef	_LIBIMAGE_H_
 #define	_LIBIMAGE_H_	1
-#include <sys/types.h>
-#include "sysdep_int.h"
+#include "sysdep_posix.h"
 
 #define	BLOCK_ERROR	-2
 
@@ -23,10 +22,9 @@
  */
 typedef struct image_type_dispatch {
     const char *type_name;
-    int (*probe)(const char *path, const sysdep_dispatch_t *sysdep);
+    int (*probe)(const char *path);
     int (*open)(const char *path, const char *cfpath, 
-		sysdep_open_mode_t omode, const sysdep_dispatch_t *sysdep,
-		void **rpp);
+		sysdep_open_mode_t omode, void **rpp);
     int (*close)(void *rp);
     int (*verify)(void *rp);
     int64_t (*blocksize)(void *rp);
@@ -43,8 +41,7 @@ typedef struct image_type_dispatch {
  * Our interface to everybody else.
  */
 int image_open(const char *path, const char *cfpath, 
-		   sysdep_open_mode_t omode, const sysdep_dispatch_t *sysdep,
-		   void **rpp);
+	       sysdep_open_mode_t omode, void **rpp);
 int image_close(void *rp);
 int image_verify(void *rp);
 int64_t image_blocksize(void *rp);

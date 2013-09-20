@@ -26,32 +26,29 @@ static const image_dispatch_t *known_types[] = {
 #define	IMAGE_MAGIC	0xceebee00
 typedef struct image_handle {
     image_dispatch_t	*i_dispatch;
-    sysdep_dispatch_t	*i_sysdep;
     void		*i_type_handle;
     u_int32_t		i_magic;
 } image_handle_t;
 
 int 
 image_open(const char *path, const char *cfpath, 
-	   sysdep_open_mode_t omode, const sysdep_dispatch_t *sysdep,
-	   void **rpp)
+	   sysdep_open_mode_t omode, void **rpp)
 {
     int itidx;
     int error = ENOENT;
 
     for (itidx = 0; itidx < (sizeof(known_types)/sizeof(known_types[0]));
 	 itidx++) {
-	if (!(error = (*known_types[itidx]->probe)(path, sysdep))) {
+	if (!(error = (*known_types[itidx]->probe)(path))) {
 	    break;
 	}
     }
     if (itidx < (sizeof(known_types)/sizeof(known_types[0]))) {
-	if (!(error = (*sysdep->sys_malloc)(rpp, sizeof(image_handle_t)))) {
+	if (!(error = posix_malloc(rpp, sizeof(image_handle_t)))) {
 	    image_handle_t *ihp = (image_handle_t *) *rpp;
 	    ihp->i_magic = IMAGE_MAGIC;
-	    ihp->i_sysdep = sysdep;
 	    ihp->i_dispatch = known_types[itidx];
-	    error = (*ihp->i_dispatch->open)(path, cfpath, omode, sysdep,
+	    error = (*ihp->i_dispatch->open)(path, cfpath, omode,
 					     &ihp->i_type_handle);
 	}
     }
@@ -65,7 +62,7 @@ image_close(void *rp)
     int error = EINVAL;
     if (ihp && (ihp->i_magic == IMAGE_MAGIC)) {
 	error = (*ihp->i_dispatch->close)(ihp->i_type_handle);
-	(void) (ihp->i_sysdep->sys_free)(ihp);
+	(void) posix_free(ihp);
     }
     return(error);
 }

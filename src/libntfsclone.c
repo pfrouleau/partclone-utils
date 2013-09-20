@@ -14,7 +14,7 @@
  *
  */
 #ifdef	HAVE_CONFIG_H
-#include <config.h>
+#include "config.h"
 #endif	/* HAVE_CONFIG_H */
 #include <errno.h>
 #include <string.h>
@@ -53,8 +53,6 @@ typedef struct libntfsclone_context {
     void		*nc_verdep;	/* Version-dependent handle */
     struct version_dispatch_table
 			*nc_dispatch;	/* Version-dependent dispatch */
-    const sysdep_dispatch_t
-			*nc_sysdep;	/* System-specific routines */
     image_hdr		nc_head;	/* Image header */
     u_int64_t		nc_curblock;	/* Current position */
     u_int32_t		nc_flags;	/* Handle flags */
@@ -165,7 +163,7 @@ v10_init(nc_context_t *ntcp)
     v10_context_t *v10p;
 
     if (NTCTX_VALID(ntcp)) {
-	if ((error = (*ntcp->nc_sysdep->sys_malloc)(&v10p, sizeof(*v10p))) == 0) {
+	if ((error = posix_malloc(&v10p, sizeof(*v10p))) == 0) {
 	    int i;
 	    memset(v10p, 0, sizeof(*v10p));
 	    ntcp->nc_verdep = v10p;
@@ -173,7 +171,7 @@ v10_init(nc_context_t *ntcp)
 
 	    if (ntcp->nc_cf_path && 
 		((int) ntcp->nc_omode >= (int) SYSDEP_OPEN_RW) &&
-		((error = cf_init(ntcp->nc_cf_path, ntcp->nc_sysdep,
+		((error = cf_init(ntcp->nc_cf_path,
 				  ntcp->nc_head.cluster_size,
 				  ntcp->nc_head.nr_clusters,
 				  &ntcp->nc_cf_handle)) == 0)) {
@@ -219,10 +217,8 @@ v10_verify(nc_context_t *ntcp)
 	     */
 	    if (ntcp->nc_head.nr_clusters & 7)
 		bmlen++;
-	    if (((error = (*ntcp->nc_sysdep->sys_malloc)(&v10p->v10_bitmap, 
-							 bmlen)) == 0) &&
-		((error = (*ntcp->nc_sysdep->sys_malloc)
-		  (&v10p->v10_bucket_offset,
+	    if (((error = posix_malloc(&v10p->v10_bitmap, bmlen)) == 0) &&
+		((error = posix_malloc(&v10p->v10_bucket_offset,
 		   ((ntcp->nc_head.nr_clusters >> 
 		     v10p->v10_bucket_factor)+1) * sizeof(u_int64_t))) == 0)) {
 		u_int64_t cclust;
@@ -235,8 +231,7 @@ v10_verify(nc_context_t *ntcp)
 		/*
 		 * Seek to the first offset.
 		 */
-		(void) (*ntcp->nc_sysdep->sys_seek)
-		    (ntcp->nc_fd, ntcp->nc_head.offset_to_image_data,
+		(void) posix_seek(ntcp->nc_fd, ntcp->nc_head.offset_to_image_data,
 		     SYSDEP_SEEK_ABSOLUTE, (u_int64_t *) NULL);
 
 		/*
@@ -253,21 +248,15 @@ v10_verify(nc_context_t *ntcp)
 		    ntfsclone_atom_t ibuf;
 		    u_int64_t rsize, iclust, cfoffs;
 		    u_int64_t xcpos;
-		    (void) (*ntcp->nc_sysdep->sys_seek)(ntcp->nc_fd, 0,
-							SYSDEP_SEEK_RELATIVE,
-							&xcpos);
-		    if ((error = (*ntcp->nc_sysdep->sys_read)(ntcp->nc_fd,
-							      &ibuf,
-							      sizeof(ibuf),
-							      &rsize))
-			== 0) {
+		    (void) posix_seek(ntcp->nc_fd, 0, SYSDEP_SEEK_RELATIVE, &xcpos);
+		    if ((error = posix_read(ntcp->nc_fd, &ibuf, sizeof(ibuf),
+					    &rsize)) == 0) {
 			switch (ibuf.nca_atype) {
 			case 0:	/* empty cluster */
 			    cclust += ibuf.nca_union.ncau_empty_count;
 			    break;
 			case 1: /* used cluster */
-			    if ((error = (*ntcp->nc_sysdep->sys_seek)
-				 (ntcp->nc_fd,
+			    if ((error = posix_seek(ntcp->nc_fd,
 				  ntcp->nc_head.cluster_size -
 				  sizeof(ibuf.nca_union),
 				  SYSDEP_SEEK_RELATIVE,
@@ -314,10 +303,10 @@ v10_finish(nc_context_t *ntcp)
 	v10_context_t *v10p = (v10_context_t *) ntcp->nc_verdep;
 
 	if (v10p->v10_bitmap)
-	    (void) (*ntcp->nc_sysdep->sys_free)(v10p->v10_bitmap);
+	    (void) posix_free(v10p->v10_bitmap);
 	if (v10p->v10_bucket_offset)
-	    (void) (*ntcp->nc_sysdep->sys_free)(v10p->v10_bucket_offset);
-	(void) (*ntcp->nc_sysdep->sys_free)(v10p);
+	    (void) posix_free(v10p->v10_bucket_offset);
+	(void) posix_free(v10p);
 	ntcp->nc_flags &= ~NC_HAVE_VERDEP;
 	error = (ntcp->nc_cf_handle) ? cf_finish(ntcp->nc_cf_handle) : 0;
     }
@@ -396,25 +385,19 @@ seek2cluster(nc_context_t *ntcp, u_int64_t cnum)
 	/*
 	 * Now the tedium...
 	 */
-	error = (*ntcp->nc_sysdep->sys_seek)(ntcp->nc_fd,
-					     imgpos,
-					     SYSDEP_SEEK_ABSOLUTE,
-					     (u_int64_t *) NULL);
+	error = posix_seek(ntcp->nc_fd, imgpos, SYSDEP_SEEK_ABSOLUTE,
+			   (u_int64_t *) NULL);
 	while (!error && (cpos < cnum)) {
 	    ntfsclone_atom_t ibuf;
 	    u_int64_t rsize;
-	    if ((error = (*ntcp->nc_sysdep->sys_read)(ntcp->nc_fd,
-						      &ibuf,
-						      sizeof(ibuf),
-						      &rsize))
+	    if ((error = posix_read(ntcp->nc_fd, &ibuf, sizeof(ibuf), &rsize))
 		== 0) {
 		switch (ibuf.nca_atype) {
 		case 0:	/* empty cluster */
 		    cpos += ibuf.nca_union.ncau_empty_count;
 		    break;
 		case 1: /* used cluster */
-		    if ((error = (*ntcp->nc_sysdep->sys_seek)
-			 (ntcp->nc_fd,
+		    if ((error = posix_seek(ntcp->nc_fd,
 			  ntcp->nc_head.cluster_size -
 			  sizeof(ibuf.nca_union),
 			  SYSDEP_SEEK_RELATIVE,
@@ -433,10 +416,8 @@ seek2cluster(nc_context_t *ntcp, u_int64_t cnum)
 	 * better match...
 	 */
 	if (!error && (cpos == cnum)) {
-	    error = (*ntcp->nc_sysdep->sys_seek)(ntcp->nc_fd,
-						 ATOM_TO_DATA_OFFSET,
-						 SYSDEP_SEEK_RELATIVE,
-						 (u_int64_t *) NULL);
+	    error = posix_seek(ntcp->nc_fd, ATOM_TO_DATA_OFFSET,
+			       SYSDEP_SEEK_RELATIVE, (u_int64_t *) NULL);
 	}
     }
     return(error);
@@ -466,10 +447,8 @@ v10_readblock(nc_context_t *ntcp, void *buffer)
 	    if ((error = seek2cluster(ntcp, ntcp->nc_curblock))	== 0) {
 		u_int64_t r_size = -1;
 
-		(void) (*ntcp->nc_sysdep->sys_read)(ntcp->nc_fd,
-						   buffer,
-						   ntcp->nc_head.cluster_size,
-						   &r_size);
+		(void) posix_read(ntcp->nc_fd, buffer,
+				  ntcp->nc_head.cluster_size, &r_size);
 		/*
 		 * XXX - endian?
 		 */
@@ -522,9 +501,8 @@ v10_writeblock(nc_context_t *ntcp, void *buffer)
 		 * We have to make up a name.
 		 */
 		if ((error = 
-		     (*ntcp->nc_sysdep->sys_malloc)(&ntcp->nc_cf_path,
-						   strlen(ntcp->nc_path) +
-						   strlen(cf_trailer) + 1)) 
+		     posix_malloc(&ntcp->nc_cf_path,
+				  strlen(ntcp->nc_path) + strlen(cf_trailer) + 1))
 		    == 0) {
 		    memcpy(ntcp->nc_cf_path, ntcp->nc_path, strlen(ntcp->nc_path));
 		    memcpy(&ntcp->nc_cf_path[strlen(ntcp->nc_path)],
@@ -532,9 +510,8 @@ v10_writeblock(nc_context_t *ntcp, void *buffer)
 		    ntcp->nc_flags |= NC_HAVE_CF_PATH;
 		}
 	    }
-	    error = cf_create(ntcp->nc_cf_path, ntcp->nc_sysdep,
-			      ntcp->nc_head.cluster_size, ntcp->nc_head.nr_clusters,
-			      &ntcp->nc_cf_handle);
+	    error = cf_create(ntcp->nc_cf_path, ntcp->nc_head.cluster_size,
+			      ntcp->nc_head.nr_clusters, &ntcp->nc_cf_handle);
 	    if (!error) {
 		ntcp->nc_flags |= (NC_HAVE_CFDEP|NC_CF_VERIFIED);
 	    }
@@ -588,22 +565,22 @@ ntfsclone_close(void *rp)
 	    (void) (*ntcp->nc_dispatch->version_sync)(ntcp);
 	}
 	if (NTCTX_OPEN(ntcp)) {
-	    (void) (*ntcp->nc_sysdep->sys_close)(ntcp->nc_fd);
+	    (void) posix_close(ntcp->nc_fd);
 	}
 	if (NTCTX_HAVE_PATH(ntcp)) {
-	    (void) (*ntcp->nc_sysdep->sys_free)(ntcp->nc_path);
+	    (void) posix_free(ntcp->nc_path);
 	}
 	if (NTCTX_HAVE_CF_PATH(ntcp)) {
-	    (void) (*ntcp->nc_sysdep->sys_free)(ntcp->nc_cf_path);
+	    (void) posix_free(ntcp->nc_cf_path);
 	}
 	if (NTCTX_HAVE_IVBLOCK(ntcp)) {
-	    (void) (*ntcp->nc_sysdep->sys_free)(ntcp->nc_ivblock);
+	    (void) posix_free(ntcp->nc_ivblock);
 	}
 	if (NTCTX_HAVE_VERDEP(ntcp)) {
 	    if (ntcp->nc_dispatch && ntcp->nc_dispatch->version_finish)
 		error = (*ntcp->nc_dispatch->version_finish)(ntcp);
 	}
-	(void) (*ntcp->nc_sysdep->sys_free)(ntcp);
+	(void) posix_free(ntcp);
 	error = 0;
     }
     return(error);
@@ -615,43 +592,37 @@ ntfsclone_close(void *rp)
  */
 int
 ntfsclone_open(const char *path, const char *cfpath, sysdep_open_mode_t omode,
-	       const sysdep_dispatch_t *sysdep, void **rpp)
+	       void **rpp)
 {
     int error = EINVAL;
-    if (sysdep) {
-	nc_context_t *ntcp;
-	error = (*sysdep->sys_malloc)(&ntcp, sizeof(*ntcp));
+    nc_context_t *ntcp;
+    error = posix_malloc(&ntcp, sizeof(*ntcp));
 
-	if (ntcp) {
-	    memset(ntcp, 0, sizeof(*ntcp));
-	    ntcp->nc_flags |= NC_VALID;
-	    ntcp->nc_sysdep = sysdep;
+    if (error == 0 && ntcp) {
+	memset(ntcp, 0, sizeof(*ntcp));
+	ntcp->nc_flags |= NC_VALID;
 
-	    if ((error = (*ntcp->nc_sysdep->sys_open)(&ntcp->nc_fd,
-						     path,
-						     SYSDEP_OPEN_RO)) == 0) {
-		ntcp->nc_flags |= NC_OPEN;
-		if ((error = 
-		     (*ntcp->nc_sysdep->sys_malloc)(&ntcp->nc_path,
-						   strlen(path)+1)) == 0) {
-		    ntcp->nc_flags |= NC_HAVE_PATH;
-		    ntcp->nc_omode = omode;
-		    memcpy(ntcp->nc_path, path, strlen(path)+1);
-		    if (cfpath &&
-			((error = 
-			  (*ntcp->nc_sysdep->sys_malloc)(&ntcp->nc_cf_path,
-							strlen(cfpath)+1)) 
-			 == 0)) {
-			ntcp->nc_flags |= NC_HAVE_CF_PATH;
-			memcpy(ntcp->nc_cf_path, cfpath, strlen(cfpath)+1);
-		    }
-		    if (!error)
-			*rpp = (void *) ntcp;
+	if ((error = posix_open(&ntcp->nc_fd, path,
+				SYSDEP_OPEN_RO)) == 0) {
+	    ntcp->nc_flags |= NC_OPEN;
+	    if ((error =
+		 posix_malloc(&ntcp->nc_path, strlen(path)+1)) == 0) {
+		ntcp->nc_flags |= NC_HAVE_PATH;
+		ntcp->nc_omode = omode;
+		memcpy(ntcp->nc_path, path, strlen(path)+1);
+		if (cfpath &&
+		    ((error =
+		      posix_malloc(&ntcp->nc_cf_path, strlen(cfpath)+1))
+		     == 0)) {
+		    ntcp->nc_flags |= NC_HAVE_CF_PATH;
+		    memcpy(ntcp->nc_cf_path, cfpath, strlen(cfpath)+1);
 		}
+		if (!error)
+		    *rpp = (void *) ntcp;
 	    }
-	    if (error) {
-		ntfsclone_close(ntcp);
-	    }
+	}
+	if (error) {
+	    ntfsclone_close(ntcp);
 	}
     }
     if (error) {
@@ -676,9 +647,8 @@ ntfsclone_verify(void *rp)
 	 * Read the header.
 	 */
 	if (((error = 
-	      (*ntcp->nc_sysdep->sys_read)(ntcp->nc_fd, &ntcp->nc_head,
-					  sizeof(ntcp->nc_head), &r_size)) == 0) 
-	    &&
+	      posix_read(ntcp->nc_fd, &ntcp->nc_head,
+			 sizeof(ntcp->nc_head), &r_size)) == 0) &&
 	    (r_size == sizeof(ntcp->nc_head))) {
 	    int veridx;
 	    int found = -1;
@@ -719,9 +689,8 @@ ntfsclone_verify(void *rp)
 			 * Allocate a buffer.
 			 */
 			if ((error = 
-			     (*ntcp->nc_sysdep->sys_malloc)
-			     (&ntcp->nc_ivblock, ntcp->nc_head.cluster_size))
-			    == 0) {
+			     posix_malloc(&ntcp->nc_ivblock,
+					  ntcp->nc_head.cluster_size)) == 0) {
 			    memset(ntcp->nc_ivblock, 69, 
 				   ntcp->nc_head.cluster_size);
 			    ntcp->nc_flags |= NC_HAVE_IVBLOCK;
@@ -877,11 +846,10 @@ ntfsclone_sync(void *rp)
  * ntfsclone_probe	- Is this a ntfsclone image?
  */
 int
-ntfsclone_probe(const char *path, const sysdep_dispatch_t *sysdep)
+ntfsclone_probe(const char *path)
 {
     void *testh = (void *) NULL;
-    int error = ntfsclone_open(path, (char *) NULL, SYSDEP_OPEN_RO,
-			       sysdep, &testh);
+    int error = ntfsclone_open(path, (char *) NULL, SYSDEP_OPEN_RO, &testh);
     if (!error) {
 	error = ntfsclone_verify(testh);
 	ntfsclone_close(testh);

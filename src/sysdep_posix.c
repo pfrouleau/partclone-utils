@@ -16,13 +16,19 @@
 #ifdef	HAVE_CONFIG_H
 #include "config.h"
 #endif	/* HAVE_CONFIG_H */
-#include <sys/types.h>
-#include <unistd.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <errno.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include "sysdep_posix.h"
+
+static const int omode2flags[] = {
+    0,
+    O_RDONLY|O_LARGEFILE,
+    O_RDWR|O_LARGEFILE,
+    O_WRONLY|O_LARGEFILE,
+    O_RDWR|O_CREAT|O_LARGEFILE,
+};
 
 /*
  * posix_open	- Open a file handle and return a pointer to it.
@@ -37,15 +43,7 @@
  * 	0	- Success
  *	error	- Otherwise (ENOMEM, see errno values of open(2)).
  */
-static const int omode2flags[] = { 
-    0,
-    O_RDONLY|O_LARGEFILE,
-    O_RDWR|O_LARGEFILE,
-    O_WRONLY|O_LARGEFILE,
-    O_RDWR|O_CREAT|O_LARGEFILE
-};
-    
-static int
+int
 posix_open(void *rhp, const char *p, sysdep_open_mode_t omode)
 {
     int **fhpp = (int **) rhp;
@@ -78,7 +76,7 @@ posix_open(void *rhp, const char *p, sysdep_open_mode_t omode)
  *	EINVAL	- Invalid file handle.
  *	error	- Otherwise.
  */
-static int
+int
 posix_close(void *rh)
 {
     int *fhp = (int *) rh;
@@ -104,7 +102,7 @@ posix_close(void *rh)
  *	0	- Success.
  *	EINVAL	- Invalid file handle.
  */
-static int
+int
 posix_seek(void *rh, int64_t offset, sysdep_whence_t whence, u_int64_t *resoffp)
 {
     int *fhp = (int *) rh;
@@ -132,7 +130,7 @@ posix_seek(void *rh, int64_t offset, sysdep_whence_t whence, u_int64_t *resoffp)
  *	EINVAL	- Invalid file handle.
  *	error	- Otherwise.
  */
-static int
+int
 posix_read(void *rh, void *buf, u_int64_t len, u_int64_t *nr)
 {
     int *fhp = (int *) rh;
@@ -158,7 +156,7 @@ posix_read(void *rh, void *buf, u_int64_t len, u_int64_t *nr)
  *	EINVAL	- Invalid file handle.
  *	error	- Otherwise.
  */
-static int
+int
 posix_write(void *rh, void *buf, u_int64_t len, u_int64_t *nw)
 {
     int *fhp = (int *) rh;
@@ -182,7 +180,7 @@ posix_write(void *rh, void *buf, u_int64_t len, u_int64_t *nw)
  *	EINVAL	- Invalid nmpp
  *	ENOMEM	- No memory available
  */
-static int
+int
 posix_malloc(void *nmpp, u_int64_t nbytes)
 {
     void **xnmp = (void **) nmpp;
@@ -199,7 +197,7 @@ posix_malloc(void *nmpp, u_int64_t nbytes)
  *	0	- Success
  *	EINVAL	- Invalid pointer
  */
-static int
+int
 posix_free(void *mp)
 {
     if (mp) {
@@ -209,8 +207,3 @@ posix_free(void *mp)
 	return(EINVAL);
     }
 }
-
-const sysdep_dispatch_t posix_dispatch = 
-{ posix_open, posix_close, posix_seek, posix_read, posix_write, posix_malloc,
-  posix_free };
-

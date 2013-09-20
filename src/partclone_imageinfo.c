@@ -37,8 +37,6 @@ typedef struct libpc_context {
     void		*pc_verdep;	/* Version-dependent handle */
     struct version_dispatch_table
 			*pc_dispatch;	/* Version-dependent dispatch */
-    const sysdep_dispatch_t
-			*pc_sysdep;	/* System-specific routines */
     image_head		pc_head;	/* Image header */
     u_int64_t		pc_curblock;	/* Current position */
     u_int32_t		pc_flags;	/* Handle flags */
@@ -66,7 +64,7 @@ main(int argc, char *argv[])
     int anomalies = 0;
 
     if ((error = partclone_open(argv[i], (char *) NULL, SYSDEP_OPEN_RO,
-				&posix_dispatch, &pctx)) == 0) {
+				&pctx)) == 0) {
       u_int64_t bmscanned = 0, unset = 0, set = 0, strange = 0;
       u_int64_t lastset = 0, laststrange = 0;
       if (((error = partclone_verify(pctx)) == 0) || dontcare) {

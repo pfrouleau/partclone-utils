@@ -37,7 +37,7 @@ main(int argc, char *argv[])
     void *pctx;
 
     if ((error = partclone_open(argv[i], (char *) NULL, SYSDEP_OPEN_RW,
-				&posix_dispatch, &pctx)) == 0) {
+				&pctx)) == 0) {
       if ((error = partclone_verify(pctx)) == 0) {
 	int ci, ofd;
 	char outfile[1024];
@@ -120,7 +120,6 @@ main(int argc, char *argv[])
 		      if (((error = partclone_open(argv[i], 
 						   cfname, 
 						   SYSDEP_OPEN_RW,
-						   &posix_dispatch,
 						   &pctx)) == 0) &&
 			  ((error = partclone_verify(pctx)) == 0) &&
 			  ((error = partclone_seek(pctx, freeblock)) == 0) &&

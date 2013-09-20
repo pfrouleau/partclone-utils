@@ -16,12 +16,10 @@
 
 #ifndef	_LIBNTFSCLONE_H_
 #define	_LIBNTFSCLONE_H_	1
-#include <sys/types.h>
-#include "sysdep_int.h"
+#include "sysdep_posix.h"
 
 int ntfsclone_open(const char *path, const char *cfpath, 
-		   sysdep_open_mode_t omode, const sysdep_dispatch_t *sysdep,
-		   void **rpp);
+		   sysdep_open_mode_t omode, void **rpp);
 int ntfsclone_close(void *rp);
 int ntfsclone_verify(void *rp);
 int64_t ntfsclone_blocksize(void *rp);

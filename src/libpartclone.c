@@ -53,8 +53,6 @@ typedef struct libpc_context {
     void		*pc_verdep;	/* Version-dependent handle */
     struct version_dispatch_table
 			*pc_dispatch;	/* Version-dependent dispatch */
-    const sysdep_dispatch_t
-			*pc_sysdep;	/* System-specific routines */
     image_head		pc_head;	/* Image header */
     u_int64_t		pc_curblock;	/* Current position */
     u_int32_t		pc_flags;	/* Handle flags */
@@ -148,7 +146,7 @@ v1_init(pc_context_t *pcp)
     v1_context_t *v1p;
 
     if (PCTX_VALID(pcp)) {
-	if ((error = (*pcp->pc_sysdep->sys_malloc)(&v1p, sizeof(*v1p))) == 0) {
+	if ((error = posix_malloc(&v1p, sizeof(*v1p))) == 0) {
 	    int i;
 	    memset(v1p, 0, sizeof(*v1p));
 	    pcp->pc_verdep = v1p;
@@ -156,7 +154,7 @@ v1_init(pc_context_t *pcp)
 
 	    if (pcp->pc_cf_path && 
 		((int) pcp->pc_omode >= (int) SYSDEP_OPEN_RW) &&
-		((error = cf_init(pcp->pc_cf_path, pcp->pc_sysdep,
+		((error = cf_init(pcp->pc_cf_path,
 				  pcp->pc_head.block_size,
 				  pcp->pc_head.totalblock,
 				  &pcp->pc_cf_handle)) == 0)) {
@@ -211,35 +209,25 @@ v1_verify(pc_context_t *pcp)
 	    /*
 	     * Allocate and fill the bitmap.
 	     */
-	    if ((error = (*pcp->pc_sysdep->sys_malloc)
-		 (&v1p->v1_bitmap, 
+	    if ((error = posix_malloc(&v1p->v1_bitmap,
 		  sizeof(unsigned char) * pcp->pc_head.totalblock)) == 0) {
 		u_int64_t r_size;
 
-		(void) (*pcp->pc_sysdep->sys_seek)(pcp->pc_fd,
-						   sizeof(pcp->pc_head),
-						   SYSDEP_SEEK_ABSOLUTE,
-						   (u_int64_t *) NULL);
-		if (((error = 
-		      (*pcp->pc_sysdep->sys_read)(pcp->pc_fd,
-						  v1p->v1_bitmap,
-						  pcp->pc_head.totalblock,
-						  &r_size)) == 0) &&
+		(void) posix_seek(pcp->pc_fd, sizeof(pcp->pc_head),
+				  SYSDEP_SEEK_ABSOLUTE, (u_int64_t *) NULL);
+		if (((error = posix_read(pcp->pc_fd, v1p->v1_bitmap,
+					 pcp->pc_head.totalblock,
+					 &r_size)) == 0) &&
 		    (r_size == pcp->pc_head.totalblock)) {
 		    char magicstr[MAGIC_LEN];
 		    /*
 		     * Finally look for the magic string.
 		     */
-		    if (((error =
-			  (*pcp->pc_sysdep->sys_read)(pcp->pc_fd,
-						      magicstr,
-						      sizeof(magicstr),
-						      &r_size)) == 0) &&
+		    if (((error = posix_read(pcp->pc_fd, magicstr,
+					     sizeof(magicstr), &r_size)) == 0) &&
 			(r_size == sizeof(magicstr)) &&
 			(memcmp(magicstr, cmagicstr, sizeof(magicstr)) == 0)) {
-			if ((error = 
-			     (*pcp->pc_sysdep->sys_malloc)
-			     (&v1p->v1_sumcount,
+			if ((error = posix_malloc(&v1p->v1_sumcount,
 			      ((pcp->pc_head.totalblock >> 
 				v1p->v1_bitmap_factor)+1) * 
 			      sizeof(u_int64_t))) == 0) {
@@ -329,10 +317,10 @@ v1_finish(pc_context_t *pcp)
 	v1_context_t *v1p = (v1_context_t *) pcp->pc_verdep;
 
 	if (v1p->v1_bitmap)
-	    (void) (*pcp->pc_sysdep->sys_free)(v1p->v1_bitmap);
+	    (void) posix_free(v1p->v1_bitmap);
 	if (v1p->v1_sumcount)
-	    (void) (*pcp->pc_sysdep->sys_free)(v1p->v1_sumcount);
-	(void) (*pcp->pc_sysdep->sys_free)(v1p);
+	    (void) posix_free(v1p->v1_sumcount);
+	(void) posix_free(v1p);
 	pcp->pc_flags &= ~PC_HAVE_VERDEP;
 	error = (pcp->pc_cf_handle) ? cf_finish(pcp->pc_cf_handle) : 0;
     }
@@ -429,9 +417,8 @@ v1_readblock(pc_context_t *pcp, void *buffer)
 	if (v1p->v1_bitmap[pcp->pc_curblock]) {
 	    /* block is valid */
 	    int64_t boffs = rblock2offset(pcp, v1p->v1_nvbcount);
-	    if ((error = (*pcp->pc_sysdep->sys_seek)
-		 (pcp->pc_fd, boffs, SYSDEP_SEEK_ABSOLUTE, (u_int64_t *) NULL))
-		== 0) {
+	    if ((error = posix_seek(pcp->pc_fd, boffs, SYSDEP_SEEK_ABSOLUTE,
+			(u_int64_t *) NULL)) == 0) {
 		u_int64_t r_size, c_size;
 		unsigned long crc_ck = 0xffffffffL;
 		unsigned long crc_ck2;
@@ -441,23 +428,14 @@ v1_readblock(pc_context_t *pcp, void *buffer)
 		 * starting checksum for this block.
 		 */
 		if (v1p->v1_nvbcount) {
-		    (void) (*pcp->pc_sysdep->sys_seek)(pcp->pc_fd,
-						       -CRC_SIZE, 
-						       SYSDEP_SEEK_RELATIVE,
-						       (u_int64_t *) NULL);
-		    (void) (*pcp->pc_sysdep->sys_read)(pcp->pc_fd, 
-						       &crc_ck, 
-						       CRC_SIZE, &c_size);
+		    (void) posix_seek(pcp->pc_fd, -CRC_SIZE,
+				      SYSDEP_SEEK_RELATIVE, (u_int64_t *) NULL);
+		    (void) posix_read(pcp->pc_fd, &crc_ck, CRC_SIZE, &c_size);
 		}
-		(void) (*pcp->pc_sysdep->sys_read)(pcp->pc_fd,
-						   buffer,
-						   pcp->pc_head.block_size,
-						   &r_size);
+		(void) posix_read(pcp->pc_fd, buffer, pcp->pc_head.block_size,
+				  &r_size);
 		crc_ck = v1_crc32(v1p, crc_ck, buffer, r_size);
-		(void) (*pcp->pc_sysdep->sys_read)(pcp->pc_fd, 
-						   &crc_ck2, 
-						   CRC_SIZE,
-						   &c_size);
+		(void) posix_read(pcp->pc_fd, &crc_ck2, CRC_SIZE, &c_size);
 		/*
 		 * XXX - endian?
 		 */
@@ -511,20 +489,16 @@ v1_writeblock(pc_context_t *pcp, void *buffer)
 		/*
 		 * We have to make up a name.
 		 */
-		if ((error = 
-		     (*pcp->pc_sysdep->sys_malloc)(&pcp->pc_cf_path,
-						   strlen(pcp->pc_path) +
-						   strlen(cf_trailer) + 1)) 
-		    == 0) {
+		if ((error = posix_malloc(&pcp->pc_cf_path,
+			strlen(pcp->pc_path) + strlen(cf_trailer) + 1)) == 0) {
 		    memcpy(pcp->pc_cf_path, pcp->pc_path, strlen(pcp->pc_path));
 		    memcpy(&pcp->pc_cf_path[strlen(pcp->pc_path)],
 			   cf_trailer, strlen(cf_trailer)+1);
 		    pcp->pc_flags |= PC_HAVE_CF_PATH;
 		}
 	    }
-	    error = cf_create(pcp->pc_cf_path, pcp->pc_sysdep,
-			      pcp->pc_head.block_size, pcp->pc_head.totalblock,
-			      &pcp->pc_cf_handle);
+	    error = cf_create(pcp->pc_cf_path, pcp->pc_head.block_size,
+			      pcp->pc_head.totalblock, &pcp->pc_cf_handle);
 	    if (!error) {
 		pcp->pc_flags |= (PC_HAVE_CFDEP|PC_CF_VERIFIED);
 	    }
@@ -575,22 +549,22 @@ partclone_close(void *rp)
 	    (void) (*pcp->pc_dispatch->version_sync)(pcp);
 	}
 	if (PCTX_OPEN(pcp)) {
-	    (void) (*pcp->pc_sysdep->sys_close)(pcp->pc_fd);
+	    (void) posix_close(pcp->pc_fd);
 	}
 	if (PCTX_HAVE_PATH(pcp)) {
-	    (void) (*pcp->pc_sysdep->sys_free)(pcp->pc_path);
+	    (void) posix_free(pcp->pc_path);
 	}
 	if (PCTX_HAVE_CF_PATH(pcp)) {
-	    (void) (*pcp->pc_sysdep->sys_free)(pcp->pc_cf_path);
+	    (void) posix_free(pcp->pc_cf_path);
 	}
 	if (PCTX_HAVE_IVBLOCK(pcp)) {
-	    (void) (*pcp->pc_sysdep->sys_free)(pcp->pc_ivblock);
+	    (void) posix_free(pcp->pc_ivblock);
 	}
 	if (PCTX_HAVE_VERDEP(pcp)) {
 	    if (pcp->pc_dispatch && pcp->pc_dispatch->version_finish)
 		error = (*pcp->pc_dispatch->version_finish)(pcp);
 	}
-	(void) (*pcp->pc_sysdep->sys_free)(pcp);
+	(void) posix_free(pcp);
 	error = 0;
     }
     return(error);
@@ -602,43 +576,36 @@ partclone_close(void *rp)
  */
 int
 partclone_open(const char *path, const char *cfpath, sysdep_open_mode_t omode,
-	       const sysdep_dispatch_t *sysdep, void **rpp)
+	       void **rpp)
 {
     int error = EINVAL;
-    if (sysdep) {
-	pc_context_t *pcp;
-	error = (*sysdep->sys_malloc)(&pcp, sizeof(*pcp));
+    pc_context_t *pcp;
+    error = posix_malloc(&pcp, sizeof(*pcp));
 
-	if (pcp) {
-	    memset(pcp, 0, sizeof(*pcp));
-	    pcp->pc_flags |= PC_VALID;
-	    pcp->pc_sysdep = sysdep;
+    if (pcp) {
+	memset(pcp, 0, sizeof(*pcp));
+	pcp->pc_flags |= PC_VALID;
 
-	    if ((error = (*pcp->pc_sysdep->sys_open)(&pcp->pc_fd,
-						     path,
-						     SYSDEP_OPEN_RO)) == 0) {
-		pcp->pc_flags |= PC_OPEN;
-		if ((error = 
-		     (*pcp->pc_sysdep->sys_malloc)(&pcp->pc_path,
-						   strlen(path)+1)) == 0) {
-		    pcp->pc_flags |= PC_HAVE_PATH;
-		    pcp->pc_omode = omode;
-		    memcpy(pcp->pc_path, path, strlen(path)+1);
-		    if (cfpath &&
-			((error = 
-			  (*pcp->pc_sysdep->sys_malloc)(&pcp->pc_cf_path,
-							strlen(cfpath)+1)) 
-			 == 0)) {
-			pcp->pc_flags |= PC_HAVE_CF_PATH;
-			memcpy(pcp->pc_cf_path, cfpath, strlen(cfpath)+1);
-		    }
-		    if (!error)
-			*rpp = (void *) pcp;
+	if ((error = posix_open(&pcp->pc_fd, path, SYSDEP_OPEN_RO)) == 0) {
+	    pcp->pc_flags |= PC_OPEN;
+	    if ((error =
+		 posix_malloc(&pcp->pc_path, strlen(path)+1)) == 0) {
+		pcp->pc_flags |= PC_HAVE_PATH;
+		pcp->pc_omode = omode;
+		memcpy(pcp->pc_path, path, strlen(path)+1);
+		if (cfpath &&
+		    ((error =
+		      posix_malloc(&pcp->pc_cf_path, strlen(cfpath)+1))
+		     == 0)) {
+		    pcp->pc_flags |= PC_HAVE_CF_PATH;
+		    memcpy(pcp->pc_cf_path, cfpath, strlen(cfpath)+1);
 		}
+		if (!error)
+		    *rpp = (void *) pcp;
 	    }
-	    if (error) {
-		partclone_close(pcp);
-	    }
+	}
+	if (error) {
+	    partclone_close(pcp);
 	}
     }
     if (error) {
@@ -662,10 +629,8 @@ partclone_verify(void *rp)
 	/*
 	 * Read the header.
 	 */
-	if (((error = 
-	      (*pcp->pc_sysdep->sys_read)(pcp->pc_fd, &pcp->pc_head,
-					  sizeof(pcp->pc_head), &r_size)) == 0) 
-	    &&
+	if (((error = posix_read(pcp->pc_fd, &pcp->pc_head,
+				 sizeof(pcp->pc_head), &r_size)) == 0) &&
 	    (r_size == sizeof(pcp->pc_head))) {
 	    int veridx;
 	    int found = -1;
@@ -712,9 +677,8 @@ partclone_verify(void *rp)
 			     * Otherwise, allocate a buffer.
 			     */
 			    if ((error = 
-				 (*pcp->pc_sysdep->sys_malloc)
-				 (&pcp->pc_ivblock, pcp->pc_head.block_size))
-				== 0) {
+				 posix_malloc(&pcp->pc_ivblock,
+					 pcp->pc_head.block_size)) == 0) {
 				memset(pcp->pc_ivblock, 69, 
 				       pcp->pc_head.block_size);
 				pcp->pc_flags |= PC_HAVE_IVBLOCK;
@@ -871,11 +835,10 @@ partclone_sync(void *rp)
  * partclone_probe	- Is this a partclone image?
  */
 int
-partclone_probe(const char *path, const sysdep_dispatch_t *sysdep)
+partclone_probe(const char *path)
 {
     void *testh = (void *) NULL;
-    int error = partclone_open(path, (char *) NULL, SYSDEP_OPEN_RO,
-			       sysdep, &testh);
+    int error = partclone_open(path, (char *) NULL, SYSDEP_OPEN_RO, &testh);
     if (!error) {
 	error = partclone_verify(testh);
 	partclone_close(testh);
