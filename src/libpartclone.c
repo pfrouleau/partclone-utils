@@ -489,8 +489,10 @@ v1_writeblock(pc_context_t *pcp, void *buffer)
 		/*
 		 * We have to make up a name.
 		 */
-		if ((error = posix_malloc(&pcp->pc_cf_path,
-			strlen(pcp->pc_path) + strlen(cf_trailer) + 1)) == 0) {
+		if ((error =
+		     posix_malloc(&pcp->pc_cf_path,
+				  strlen(pcp->pc_path) + strlen(cf_trailer) + 1))
+		    == 0) {
 		    memcpy(pcp->pc_cf_path, pcp->pc_path, strlen(pcp->pc_path));
 		    memcpy(&pcp->pc_cf_path[strlen(pcp->pc_path)],
 			   cf_trailer, strlen(cf_trailer)+1);
