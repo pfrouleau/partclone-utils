@@ -285,6 +285,56 @@ v1_init(pc_context_t *pcp)
     return(error);
 }
 
+/*
+ * v2_init - Initialize version 2 file handling.
+ *
+ * - Allocate and initialize version 2 handle.
+ * - Precalculate the CRC table.
+ */
+static int
+v2_init(pc_context_t *pcp)
+{
+    int error = EINVAL;
+    u_int64_t r_size;
+
+    if (PCTX_VALID(pcp)) {
+	/*
+	 * Read image details
+	 */
+	error = posix_read(pcp->pc_fd, &pcp->pc_desc.fs,
+			   sizeof(pcp->pc_desc.fs), &r_size);
+	if (error != 0 || r_size != sizeof(pcp->pc_desc.fs)) {
+	    error = EIO;
+	} else {
+
+	    error = posix_read(pcp->pc_fd, &pcp->pc_desc.options,
+			       sizeof(pcp->pc_desc.options), &r_size);
+	    if (error != 0 || r_size != sizeof(pcp->pc_desc.options)) {
+		error = EIO;
+	    } else {
+		if ((error = alloc_v1_context(pcp)) == 0 &&
+		    (error = init_omode(pcp)) == 0) {
+		    init_crc32_table(pcp->pc_verdep);
+
+		    unsigned cs_r;
+		    unsigned cs = CRC32_SEED_PARTCLONE;
+		    v1_context_t *v1p = (v1_context_t *)pcp->pc_verdep;
+		    cs = v2_crc32(v1p, cs, &pcp->pc_desc, sizeof(pcp->pc_desc));
+		    if ((error =
+			  posix_read(pcp->pc_fd, &cs_r, CRC32_SIZE, &r_size))
+			 == 0) {
+			if (r_size != CRC32_SIZE)
+			    error = EIO;
+			else if (cs != cs_r)
+			    error = EINVAL;
+		    }
+		}
+	    }
+	}
+    }
+    return(error);
+}
+
 int
 read_bitmap_byte(pc_context_t *pcp)
 {
@@ -432,6 +482,14 @@ v1_verify(pc_context_t *pcp)
     return(error);
 }
 
+static int
+v2_verify(pc_context_t *pcp)
+{
+    int error = ENOSYS;
+
+    return(error);
+}
+
 /*
  * v1_finish	- Finish version-specific handling.
  *
@@ -453,6 +511,14 @@ v1_finish(pc_context_t *pcp)
 	pcp->pc_flags &= ~PC_HAVE_VERDEP;
 	error = (pcp->pc_cf_handle) ? cf_finish(pcp->pc_cf_handle) : 0;
     }
+    return(error);
+}
+
+static int
+v2_finish(pc_context_t *pcp)
+{
+    int error = ENOSYS;
+
     return(error);
 }
 
@@ -485,6 +551,14 @@ v1_seek(pc_context_t *pcp, u_int64_t blockno)
 	error = (pcp->pc_cf_handle) ? cf_seek(pcp->pc_cf_handle, blockno) : 0;
 	    
     }
+    return(error);
+}
+
+static int
+v2_seek(pc_context_t *pcp, u_int64_t blockno)
+{
+    int error = ENOSYS;
+
     return(error);
 }
 
@@ -566,6 +640,14 @@ v1_readblock(pc_context_t *pcp, void *buffer)
     return(error);
 }
 
+static int
+v2_readblock(pc_context_t *pcp, void *buffer)
+{
+    int error = ENOSYS;
+
+    return(error);
+}
+
 /*
  * v1_blockused	- Is the current block in use?
  */
@@ -579,6 +661,14 @@ v1_blockused(pc_context_t *pcp)
 	retval = (pcp->pc_cf_handle && cf_blockused(pcp->pc_cf_handle)) ? 1 : 
 	    v1p->v1_bitmap[pcp->pc_curblock];
     }
+    return(retval);
+}
+
+static int
+v2_blockused(pc_context_t *pcp)
+{
+    int retval = ENOSYS;
+
     return(retval);
 }
 
@@ -624,6 +714,14 @@ v1_writeblock(pc_context_t *pcp, void *buffer)
     return(error);
 }
 
+static int
+v2_writeblock(pc_context_t *pcp, void *buffer)
+{
+    int error = ENOSYS;
+
+    return(error);
+}
+
 /*
  * v1_sync	- Flush changes to change file
  */
@@ -637,6 +735,13 @@ v1_sync(pc_context_t *pcp)
     return(error);
 }
 
+static int
+v2_sync(pc_context_t *pcp)
+{
+    int error = ENOSYS;
+    return(error);
+}
+
 /*
  * Dispatch table for handling various versions.
  */
@@ -645,6 +750,9 @@ version_table[] = {
     { "0001", 
       v1_init, v1_verify, v1_finish, v1_seek, v1_readblock, v1_blockused,
       v1_writeblock, v1_sync },
+    { "0002",
+      v2_init, v2_verify, v2_finish, v2_seek, v2_readblock, v2_blockused,
+      v2_writeblock, v2_sync },
 };
 
 /*
