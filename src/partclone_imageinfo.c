@@ -21,6 +21,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include "libbitmap.h"
 #include "libpartclone.h"
 #include "sysdep_posix.h"
 #include "partclone.h"
@@ -43,7 +44,7 @@ typedef struct libpc_context {
 } pc_context_t;
 
 typedef struct version_1_context {
-    unsigned char	*v1_bitmap;		/* Usage bitmap */
+    unsigned char	*bitmap;		/* Usage bitmap */
     u_int64_t		*v1_sumcount;		/* Precalculated indices */
     u_int64_t		v1_nvbcount;		/* Preceding valid blocks */
     unsigned long	v1_crc_tab32[CRC_TABLE_LEN];
@@ -75,19 +76,12 @@ main(int argc, char *argv[])
 	if (dontcare && error)
 	  p->pc_flags |= 4;
 	for (bmi = 0; bmi < p->pc_desc.fs.totalblock; bmi++) {
-	  switch (v->v1_bitmap[bmi]) {
-	  case 0:
-	    unset++; break;
-	  case 1:
-	    set++; lastset = bmi; break;
-	  default:
-	    strange++;
-	    laststrange = bmi;
-	    fprintf(stderr, "%s: block %llu (0x%016llx) bitmap %d (0x%02x)?\n", argv[i], bmi, bmi,
-		    v->v1_bitmap[bmi], v->v1_bitmap[bmi]);
-	    anomalies++;
-	    break;
-	  }
+	    if(bitmap_test_bit(v->bitmap, bmi)) {
+		++set;
+		lastset = bmi;
+	    } else {
+		++unset;
+	    }
 	  bmscanned++;
 	}
 	fprintf(stdout, "%s: %llu blocks, %llu blocks scanned, %llu unset, %llu set, %llu strange\n",

@@ -20,6 +20,7 @@
 #include <string.h>
 #include "changefile.h"
 #include "partclone.h"
+#include "libbitmap.h"
 #include "libpartclone.h"
 #include "libimage.h"
 
@@ -125,7 +126,7 @@ static const char cmagicstr[] = "BiTmAgIc";
  * Per-version specific handles.
  */
 typedef struct version_1_context {
-    unsigned char	*v1_bitmap;		/* Usage bitmap */
+    unsigned char	*bitmap;		/* Usage bitmap */
     u_int64_t		*v1_sumcount;		/* Precalculated indices */
     u_int64_t		v1_nvbcount;		/* Preceding valid blocks */
     unsigned long	v1_crc_tab32[CRC_TABLE_LEN];
@@ -336,17 +337,40 @@ v2_init(pc_context_t *pcp)
 }
 
 int
-read_bitmap_byte(pc_context_t *pcp)
+read_bitmap_byte(pc_context_t *pcp, u_int64_t to_read)
 {
-    int error;
-    u_int64_t r_size;
+    unsigned char buf[16384];
     v1_context_t *v1p = (v1_context_t *) pcp->pc_verdep;
+    u_int64_t next_read, offset = 0;
+    u_int64_t r_size;
+    int error;
 
-    if (((error = posix_read(pcp->pc_fd, v1p->v1_bitmap,
-			     pcp->pc_desc.fs.totalblock,
-			     &r_size)) == 0) &&
-	(r_size != pcp->pc_desc.fs.totalblock)) {
-	error = EINVAL;
+    while(to_read > 0) {
+	next_read = to_read <= sizeof(buf) ? to_read : sizeof(buf);
+	error = posix_read(pcp->pc_fd, buf, next_read, &r_size);
+	if ((error == 0) && (r_size == next_read)) {
+	    u_int64_t idx = 0;
+
+	    to_read -= next_read;
+	    for(;idx < next_read; ++idx, ++offset) {
+		/* [2011-08]
+		 * ...sigh... the *bitmap* can have more than
+		 * two values.  It can be 1, in which case it's
+		 * definitely in the file.  It can be zero
+		 * in which case, it's definitely not in the
+		 * file.  And it can be anything else that fits
+		 * into a byte?  What does it mean?  I don't
+		 * know.  But it's not set.
+		 */
+		if (buf[idx] == 1)
+		    bitmap_set_bit(v1p->bitmap, offset);
+	    }
+	} else {
+	    if (r_size != next_read) {
+		error = EINVAL;
+	    }
+	    break;
+	}
     }
     return(error);
 }
@@ -355,13 +379,18 @@ static int
 v1_read_bitmap(pc_context_t *pcp)
 {
     int error;
-    u_int64_t r_size;
-    char magicstr[MAGIC_LEN];
+    v1_context_t *v1p = (v1_context_t *) pcp->pc_verdep;
+    u_int64_t bitmap_size = BITS_TO_BYTES(pcp->pc_desc.fs.totalblock);
+
+    memset(v1p->bitmap, 0, bitmap_size);
 
     /*
      * Fill the bitmap and look for the magic string
      */
-    if ((error = read_bitmap_byte(pcp)) == 0) {
+    if ((error = read_bitmap_byte(pcp, pcp->pc_desc.fs.totalblock)) == 0) {
+	u_int64_t r_size;
+	char magicstr[MAGIC_LEN];
+
 	if ((error = posix_read(pcp->pc_fd, magicstr,
 			        sizeof(magicstr), &r_size)) == 0) {
 	    if ((r_size != sizeof(magicstr)) ||
@@ -392,17 +421,8 @@ generate_usedblocks_map(pc_context_t *pcp, u_int64_t* nsetp)
 	    if ((i & ((1<<v1p->v1_bitmap_factor)-1)) == 0) {
 		v1p->v1_sumcount[i>>v1p->v1_bitmap_factor] = nset;
 	    }
-	    /* [2011-08]
-	     * ...sigh... the *bitmap* can have more than
-	     * two values.  It can be 1, in which case it's
-	     * definitely in the file.  It can be zero
-	     * in which case, it's definitely not in the
-	     * file.  And it can be anything else that fits
-	     * into a byte?  What does it mean?  I don't
-	     * know.  But it's not set.
-	     */
-	    if (v1p->v1_bitmap[i] == 1)
-		nset++;
+	    if (bitmap_test_bit(v1p->bitmap, i))
+		++nset;
 	}
 	*nsetp = nset;
     }
@@ -428,8 +448,9 @@ v1_verify(pc_context_t *pcp)
 	/*
 	 * Allocate the bitmap.
 	 */
-	if ((error = posix_malloc(&v1p->v1_bitmap,
-				  pcp->pc_desc.fs.totalblock)) == 0) {
+	if ((error = posix_malloc(&v1p->bitmap,
+				  BITS_TO_BYTES(pcp->pc_desc.fs.totalblock)))
+	    == 0) {
 	    u_int64_t nset;
 
 	    if ((error = v1_read_bitmap(pcp) == 0) &&
@@ -503,8 +524,8 @@ v1_finish(pc_context_t *pcp)
     if (PCTX_HAVE_VERDEP(pcp)) {
 	v1_context_t *v1p = (v1_context_t *) pcp->pc_verdep;
 
-	if (v1p->v1_bitmap)
-	    (void) posix_free(v1p->v1_bitmap);
+	if (v1p->bitmap)
+	    (void) posix_free(v1p->bitmap);
 	if (v1p->v1_sumcount)
 	    (void) posix_free(v1p->v1_sumcount);
 	(void) posix_free(v1p);
@@ -544,7 +565,7 @@ v1_seek(pc_context_t *pcp, u_int64_t blockno)
 	for (pbn = blockno & ~((1<<v1p->v1_bitmap_factor)-1); 
 	     pbn < blockno; 
 	     pbn++) {
-	    if (v1p->v1_bitmap[pbn]) {
+	    if (bitmap_test_bit(v1p->bitmap, pbn)) {
 		v1p->v1_nvbcount++;
 	    }
 	}
@@ -592,7 +613,7 @@ v1_readblock(pc_context_t *pcp, void *buffer)
 	/*
 	 * Determine whether the block is used/valid.
 	 */
-	if (v1p->v1_bitmap[pcp->pc_curblock]) {
+	if (bitmap_test_bit(v1p->bitmap, pcp->pc_curblock)) {
 	    /* block is valid */
 	    int64_t boffs = rblock2offset(pcp, v1p->v1_nvbcount);
 	    if ((error =
@@ -659,7 +680,7 @@ v1_blockused(pc_context_t *pcp)
 	v1_context_t *v1p = (v1_context_t *) pcp->pc_verdep;
 
 	retval = (pcp->pc_cf_handle && cf_blockused(pcp->pc_cf_handle)) ? 1 : 
-	    v1p->v1_bitmap[pcp->pc_curblock];
+	    bitmap_test_bit(v1p->bitmap, pcp->pc_curblock);
     }
     return(retval);
 }
