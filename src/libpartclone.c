@@ -177,6 +177,21 @@ v1_crc32(v1_context_t *v1p, unsigned long crc, void *buf, size_t size)
     return(crc);
 }
 
+static inline unsigned long
+v2_crc32(v1_context_t *v1p, unsigned long crc, void *buf, size_t size)
+{
+    size_t s;
+    unsigned long tmp;
+    const unsigned char *bufc = (unsigned char*)buf;
+
+    for (s=0; s<size; ++s) {
+	unsigned char c = bufc[s];
+	tmp = crc ^ (((unsigned long) c) & 0x000000ffL);
+	crc = (crc >> 8) ^ v1p->v1_crc_tab32[ tmp & 0xff ];
+    }
+    return(crc);
+}
+
 int
 init_omode(pc_context_t *pcp)
 {
@@ -510,7 +525,7 @@ v1_readblock(pc_context_t *pcp, void *buffer)
 		 posix_seek(pcp->pc_fd, boffs, SYSDEP_SEEK_ABSOLUTE,
 			    (u_int64_t *) NULL)) == 0) {
 		u_int64_t r_size, c_size;
-		unsigned long crc_ck = 0xffffffffL;
+		unsigned long crc_ck = CRC32_SEED_PARTCLONE;
 		unsigned long crc_ck2;
 		/*
 		 * The stored checksums are apparently incremental.  So,

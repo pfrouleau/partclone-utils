@@ -39,6 +39,7 @@
 #define PARTCLONE_VERSION_SIZE (FS_MAGIC_SIZE-1)
 #define SECTOR_SIZE 512
 #define CRC32_SIZE 4
+#define CRC32_SEED_PARTCLONE 0xFFFFFFFFU
 
 /* Disable fields alignment for struct stored in the image */
 #pragma pack(push, 1)
