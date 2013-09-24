@@ -417,8 +417,9 @@ v1_readblock(pc_context_t *pcp, void *buffer)
 	if (v1p->v1_bitmap[pcp->pc_curblock]) {
 	    /* block is valid */
 	    int64_t boffs = rblock2offset(pcp, v1p->v1_nvbcount);
-	    if ((error = posix_seek(pcp->pc_fd, boffs, SYSDEP_SEEK_ABSOLUTE,
-			(u_int64_t *) NULL)) == 0) {
+	    if ((error =
+		 posix_seek(pcp->pc_fd, boffs, SYSDEP_SEEK_ABSOLUTE,
+			    (u_int64_t *) NULL)) == 0) {
 		u_int64_t r_size, c_size;
 		unsigned long crc_ck = 0xffffffffL;
 		unsigned long crc_ck2;
