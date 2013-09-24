@@ -641,7 +641,7 @@ v2_finish(pc_context_t *pcp)
  * Update the number of preceding valid blocks.
  */
 static int
-v1_seek(pc_context_t *pcp, u_int64_t blockno)
+v0_seek(pc_context_t *pcp, u_int64_t blockno)
 {
     int error = EINVAL;
 
@@ -664,14 +664,6 @@ v1_seek(pc_context_t *pcp, u_int64_t blockno)
 	error = (pcp->pc_cf_handle) ? cf_seek(pcp->pc_cf_handle, blockno) : 0;
 	    
     }
-    return(error);
-}
-
-static int
-v2_seek(pc_context_t *pcp, u_int64_t blockno)
-{
-    int error = ENOSYS;
-
     return(error);
 }
 
@@ -861,10 +853,10 @@ v2_sync(pc_context_t *pcp)
 static const v_dispatch_table_t
 version_table[] = {
     { "0001", 
-      v1_init, v1_verify, v1_finish, v1_seek, v1_readblock, v1_blockused,
+      v1_init, v1_verify, v1_finish, v0_seek, v1_readblock, v1_blockused,
       v1_writeblock, v1_sync },
     { "0002",
-      v2_init, v2_verify, v2_finish, v2_seek, v2_readblock, v2_blockused,
+      v2_init, v2_verify, v2_finish, v0_seek, v2_readblock, v2_blockused,
       v2_writeblock, v2_sync },
 };
 
