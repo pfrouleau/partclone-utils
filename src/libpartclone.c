@@ -337,6 +337,20 @@ v2_init(pc_context_t *pcp)
 }
 
 int
+read_bitmap_bit(pc_context_t *pcp, u_int64_t to_read)
+{
+    v1_context_t *v1p = (v1_context_t *) pcp->pc_verdep;
+    u_int64_t r_size;
+    int error;
+
+    error = posix_read(pcp->pc_fd, v1p->bitmap, to_read, &r_size);
+    if ((error == 0) && (r_size != to_read)) {
+	error = EINVAL;
+    }
+    return(error);
+}
+
+int
 read_bitmap_byte(pc_context_t *pcp, u_int64_t to_read)
 {
     unsigned char buf[16384];
@@ -396,6 +410,41 @@ v1_read_bitmap(pc_context_t *pcp)
 	    if ((r_size != sizeof(magicstr)) ||
 		(memcmp(magicstr, cmagicstr, sizeof(magicstr)) != 0)) {
 		error = EINVAL;
+	    }
+	}
+    }
+    return(error);
+}
+
+static int
+v2_read_bitmap(pc_context_t *pcp)
+{
+    int error;
+    u_int64_t r_size;
+    v1_context_t *v1p = (v1_context_t *) pcp->pc_verdep;
+
+    if (pcp->pc_desc.options.bitmap_mode == BM_NONE) {
+	/*
+	 * No bitmap means all the blocks are present
+	 */
+	memset(v1p->bitmap, 0xFF, BITS_TO_BYTES(pcp->pc_desc.fs.totalblock));
+    } else {
+	/*
+	 * Fill the bitmap and check the checksum
+	 */
+	if ((error = read_bitmap_bit(pcp)) == 0) {
+	    unsigned cs_r, cs = CRC32_SEED_PARTCLONE;
+
+	    if ((error = posix_read(pcp->pc_fd, &cs_r,
+				    CRC32_SIZE, &r_size)) == 0) {
+		if (r_size != CRC32_SIZE)
+		    error = EIO;
+		else {
+		    cs = v2_crc32(v1p, cs, v1p->bitmap,
+				  BITS_TO_BYTES(pcp->pc_desc.fs.totalblock));
+		    if (cs_r != cs)
+			error = EINVAL;
+		}
 	    }
 	}
     }
@@ -506,8 +555,51 @@ v1_verify(pc_context_t *pcp)
 static int
 v2_verify(pc_context_t *pcp)
 {
-    int error = ENOSYS;
+    int error = EINVAL;
 
+    if (PCTX_OPEN(pcp)) {
+	v1_context_t *v1p = (v1_context_t *) pcp->pc_verdep;
+
+	posix_seek(pcp->pc_fd, sizeof(image_desc_v2) + CRC32_SIZE,
+		   SYSDEP_SEEK_ABSOLUTE, (u_int64_t *) NULL);
+	/*
+	 * Allocate the bitmap.
+	 */
+	if ((error =
+	     posix_malloc(&v1p->bitmap, pcp->pc_desc.fs.totalblock)) != 0) {
+	    error = EINVAL;
+	} else {
+	    u_int64_t nset;
+
+	    if ((error = v2_read_bitmap(pcp) == 0) &&
+		(error = generate_usedblocks_map(pcp, &nset)) == 0) {
+		/*
+		 * Fixup device size...
+		 */
+		u_int64_t device_size;
+
+		device_size = pcp->pc_desc.fs.totalblock *
+			      pcp->pc_desc.fs.block_size;
+		if (pcp->pc_desc.fs.device_size != device_size)
+		    pcp->pc_desc.fs.device_size  = device_size;
+
+		/*
+		 * Is the count of used blocks good?
+		 */
+		if (pcp->pc_desc.fs.used_bitmap != nset) {
+		    error = EFAULT;
+		}
+		if (!error && pcp->pc_cf_handle) {
+		    /*
+		     * Verify the change file, if present.
+		     */
+		    error = cf_verify(pcp->pc_cf_handle);
+		    if (!error)
+			pcp->pc_flags |= PC_CF_VERIFIED;
+		}
+	    }
+	}
+    }
     return(error);
 }
 
