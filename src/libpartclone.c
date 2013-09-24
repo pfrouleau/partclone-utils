@@ -422,17 +422,18 @@ v2_read_bitmap(pc_context_t *pcp)
     int error;
     u_int64_t r_size;
     v1_context_t *v1p = (v1_context_t *) pcp->pc_verdep;
+    u_int64_t bitmap_size = BITS_TO_BYTES(pcp->pc_desc.fs.totalblock);
 
     if (pcp->pc_desc.options.bitmap_mode == BM_NONE) {
 	/*
 	 * No bitmap means all the blocks are present
 	 */
-	memset(v1p->bitmap, 0xFF, BITS_TO_BYTES(pcp->pc_desc.fs.totalblock));
+	memset(v1p->bitmap, 0xFF, bitmap_size);
     } else {
 	/*
 	 * Fill the bitmap and check the checksum
 	 */
-	if ((error = read_bitmap_bit(pcp)) == 0) {
+	if ((error = read_bitmap_bit(pcp, bitmap_size)) == 0) {
 	    unsigned cs_r, cs = CRC32_SEED_PARTCLONE;
 
 	    if ((error = posix_read(pcp->pc_fd, &cs_r,
@@ -440,8 +441,7 @@ v2_read_bitmap(pc_context_t *pcp)
 		if (r_size != CRC32_SIZE)
 		    error = EIO;
 		else {
-		    cs = v2_crc32(v1p, cs, v1p->bitmap,
-				  BITS_TO_BYTES(pcp->pc_desc.fs.totalblock));
+		    cs = v2_crc32(v1p, cs, v1p->bitmap, bitmap_size);
 		    if (cs_r != cs)
 			error = EINVAL;
 		}
