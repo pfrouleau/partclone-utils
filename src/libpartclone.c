@@ -151,6 +151,32 @@ init_crc32_table(v1_context_t *v1p)
     v1p->v1_bitmap_factor = V1_DEFAULT_FACTOR;
 }
 
+/*
+ * This routine is so wrong.  This isn't actually a CRC over the buffer,
+ * it's a CRC of the first byte, iterated "size" number of times.  This is
+ * to mimic the behavior of partclone (ech).
+ */
+static inline unsigned long
+v1_crc32(v1_context_t *v1p, unsigned long crc, void *buf, size_t size)
+{
+    size_t s;
+    unsigned long tmp;
+    const unsigned char *bufc = (unsigned char*)buf;
+
+    for (s=0; s<size; s++) {
+	/*
+	 * The copied logic advanced s without using it to offset into buf.
+	 * The correct thing to do here would be to move buf[s], but we
+	 * want this to be able to successfully read the files generated
+	 * by partclone.
+	 */
+	unsigned char c = bufc[0];
+	tmp = crc ^ (((unsigned long) c) & 0x000000ffL);
+	crc = (crc >> 8) ^ v1p->v1_crc_tab32[ tmp & 0xff ];
+    }
+    return(crc);
+}
+
 int
 init_omode(pc_context_t *pcp)
 {
@@ -456,31 +482,6 @@ rblock2offset(pc_context_t *pcp, u_int64_t rbnum)
 {
     return(sizeof(image_desc_v1) + pcp->pc_desc.fs.totalblock + MAGIC_LEN +
 	   (rbnum * (pcp->pc_desc.fs.block_size + pcp->pc_desc.options.checksum_size)));
-}
-
-/*
- * This routine is so wrong.  This isn't actually a CRC over the buffer,
- * it's a CRC of the first byte, iterated "size" number of times.  This is
- * to mimic the behavior of partclone (ech).
- */
-static inline unsigned long 
-v1_crc32(v1_context_t *v1p, unsigned long crc, char *buf, size_t size)
-{
-    size_t s;
-    unsigned long tmp;
-
-    for (s=0; s<size; s++) {
-	/*
-	 * The copied logic advanced s without using it to offset into buf.
-	 * The correct thing to do here would be to move buf[s], but we
-	 * want this to be able to successfully read the files generated
-	 * by partclone.
-	 */
-	char c = buf[0];
-	tmp = crc ^ (((unsigned long) c) & 0x000000ffL);
-	crc = (crc >> 8) ^ v1p->v1_crc_tab32[ tmp & 0xff ];
-    }
-    return(crc);
 }
 
 /*
