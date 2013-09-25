@@ -55,6 +55,7 @@ typedef struct libpc_context {
     struct version_dispatch_table
 			*pc_dispatch;	/* Version-dependent dispatch */
     image_desc_v2	pc_desc;	/* Image desc */
+    u_int64_t		pc_block_offset;/* offset of the first block */
     u_int64_t		pc_curblock;	/* Current position */
     u_int32_t		pc_flags;	/* Handle flags */
     sysdep_open_mode_t	pc_omode;	/* Open mode */
@@ -410,6 +411,9 @@ v1_read_bitmap(pc_context_t *pcp)
 	    if ((r_size != sizeof(magicstr)) ||
 		(memcmp(magicstr, cmagicstr, sizeof(magicstr)) != 0)) {
 		error = EINVAL;
+	    } else {
+		pcp->pc_block_offset = sizeof(image_desc_v1) + MAGIC_LEN +
+				       pcp->pc_desc.fs.totalblock;
 	    }
 	}
     }
@@ -429,6 +433,7 @@ v2_read_bitmap(pc_context_t *pcp)
 	 * No bitmap means all the blocks are present
 	 */
 	memset(v1p->bitmap, 0xFF, bitmap_size);
+	pcp->pc_block_offset = sizeof(image_desc_v2) + CRC32_SIZE;
     } else {
 	/*
 	 * Fill the bitmap and check the checksum
@@ -444,6 +449,9 @@ v2_read_bitmap(pc_context_t *pcp)
 		    cs = v2_crc32(v1p, cs, v1p->bitmap, bitmap_size);
 		    if (cs_r != cs)
 			error = EINVAL;
+		    else
+			pcp->pc_block_offset = sizeof(image_desc_v2) +
+					       bitmap_size + 2 * CRC32_SIZE;
 		}
 	    }
 	}
@@ -674,8 +682,12 @@ v0_seek(pc_context_t *pcp, u_int64_t blockno)
 static inline int64_t
 rblock2offset(pc_context_t *pcp, u_int64_t rbnum)
 {
-    return(sizeof(image_desc_v1) + pcp->pc_desc.fs.totalblock + MAGIC_LEN +
-	   (rbnum * (pcp->pc_desc.fs.block_size + pcp->pc_desc.options.checksum_size)));
+    u_int64_t cs_count = pcp->pc_desc.options.checksum_mode == CSM_NONE ?
+	    0 : (rbnum / pcp->pc_desc.options.blocks_per_checksum);
+
+    return(pcp->pc_block_offset +
+	   rbnum * pcp->pc_desc.fs.block_size +
+	   cs_count * pcp->pc_desc.options.checksum_size);
 }
 
 /*
