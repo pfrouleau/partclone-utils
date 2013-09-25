@@ -757,11 +757,82 @@ v1_readblock(pc_context_t *pcp, void *buffer)
     return(error);
 }
 
+/*
+ * v2_readblock - Read the block at the current position.
+ */
 static int
 v2_readblock(pc_context_t *pcp, void *buffer)
 {
-    int error = ENOSYS;
+    int error = EINVAL;
 
+    /*
+     * Check to see if we can get the result from the change file.
+     */
+    if (PCTX_HAVE_VERDEP(pcp) &&
+	(!pcp->pc_cf_handle ||
+	 ((error = cf_readblock(pcp->pc_cf_handle, buffer)) != 0))) {
+	v1_context_t *v1p = (v1_context_t *) pcp->pc_verdep;
+
+	/*
+	 * Determine whether the block is used/valid.
+	 */
+	if (bitmap_test_bit(v1p->bitmap, pcp->pc_curblock)) {
+	    /* block is valid */
+	    int64_t boffs = rblock2offset(pcp, v1p->v1_nvbcount);
+	    if ((error =
+		 posix_seek(pcp->pc_fd, boffs, SYSDEP_SEEK_ABSOLUTE,
+			    (u_int64_t *) NULL)) == 0) {
+		u_int64_t r_size, c_size;
+		unsigned long crc_ck = CRC32_SEED_PARTCLONE;
+		unsigned long crc_ck2;
+		/*
+		 * Only verify the checksum if all blocks have one.
+		 */
+		int verify_checksum =
+		    pcp->pc_desc.options.reseed_checksum == 0 &&
+		    pcp->pc_desc.options.blocks_per_checksum == 1;
+
+		/*
+		 * Read the checksum of the previous block if it is not
+		 * reseeded after each write.
+		 */
+		if (v1p->v1_nvbcount && verify_checksum) {
+		    (void) posix_seek(pcp->pc_fd,
+				      -pcp->pc_desc.options.checksum_size,
+				      SYSDEP_SEEK_RELATIVE, (u_int64_t *) NULL);
+		    (void) posix_read(pcp->pc_fd, &crc_ck,
+				      pcp->pc_desc.options.checksum_size,
+				      &c_size);
+		}
+		error = posix_read(pcp->pc_fd, buffer,
+				   pcp->pc_desc.fs.block_size, &r_size);
+		if (error == 0) {
+		    if (r_size != pcp->pc_desc.fs.block_size) {
+			error = EIO;
+		    } else if (verify_checksum) {
+			crc_ck = v1_crc32(v1p, crc_ck, buffer, r_size);
+			(void) posix_read(pcp->pc_fd, &crc_ck2,
+				          pcp->pc_desc.options.checksum_size,
+				          &c_size);
+			/*
+			 * XXX - endian?
+			 */
+			if ((c_size != pcp->pc_desc.options.checksum_size) ||
+			    (crc_ck != crc_ck2)) {
+			    error = EIO;
+			}
+		    }
+		    v1p->v1_nvbcount++;
+		}
+	    }
+	} else {
+	    /*
+	     * If we're reading an invalid block, use the handy buffer.
+	     */
+	    memcpy(buffer, pcp->pc_ivblock, pcp->pc_desc.fs.block_size);
+	    error = 0;	/* This shouldn't be necessary... */
+	}
+    }
     return(error);
 }
 
