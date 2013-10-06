@@ -62,6 +62,7 @@ int64_t partclone_blocksize(void *rp);
 int64_t partclone_blockcount(void *rp);
 int partclone_seek(void *rp, u_int64_t blockno);
 u_int64_t partclone_tell(void *rp);
+void partclone_written_blocks(void *rp, u_int64_t size, int64_t *block_writen, int64_t *extra_bytes);
 int partclone_readblocks(void *rp, void *buffer, u_int64_t nblocks);
 int partclone_block_used(void *rp);
 int partclone_writeblocks(void *rp, void *buffer, u_int64_t nblocks);

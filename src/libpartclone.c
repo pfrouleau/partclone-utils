@@ -1131,6 +1131,47 @@ partclone_tell(void *rp)
     return((PCTX_READREADY(pcp)) ? pcp->pc_curblock : ~0);
 }
 
+void
+partclone_written_blocks(void *rp, u_int64_t size, int64_t *block_writen, int64_t *extra_bytes)
+{
+    pc_context_t *pcp = (pc_context_t *) rp;
+
+    *block_writen = -1;
+    *extra_bytes  = -1;
+
+    if (PCTX_READREADY(pcp)) {
+	const image_options_v2 * iop = &(pcp->pc_desc.options);
+	const u_int64_t block_size = pcp->pc_desc.fs.block_size;
+
+	if (iop->checksum_mode == CSM_NONE) {
+	    *block_writen = size / block_size;
+	    *extra_bytes  = size % block_size;
+	} else {
+	    off_t chunk_size = block_size * iop->blocks_per_checksum +
+			       iop->checksum_size;
+	    off_t chunk_count = size / chunk_size;
+
+	    /*
+	     * A partial chunk may be present at the end and he have a checksum
+	     */
+	    off_t partial_chunk_size = size % chunk_size;
+	    off_t extra_blk = partial_chunk_size / block_size;
+	    if (partial_chunk_size % block_size < iop->checksum_size) {
+		/*
+		 * Not enough byte for the latest checksum
+		 */
+		if(extra_blk > 0) extra_blk--;
+	    }
+
+	    *block_writen = chunk_count * iop->blocks_per_checksum + extra_blk;
+	    *extra_bytes  = size - chunk_size * chunk_count -
+			    extra_blk * block_size;
+	    if (extra_blk)
+		*extra_bytes -= iop->checksum_size;
+	}
+    }
+}
+
 /*
  * partclone_readblocks	- Read blocks from the current position.
  */

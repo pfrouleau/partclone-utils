@@ -74,20 +74,19 @@ main(int argc, char *argv[])
 	  int *fd = (int *) p->pc_fd;
 	  off_t sblkpos;
 	  off_t fsize;
+	  off_t blkw = 0, extra = 0;
 	  struct stat sbuf;
-	  error = partclone_seek(pctx, 0);
-	  error = partclone_readblocks(pctx, iob, 1);
-	  sblkpos = lseek(*fd, 0, SEEK_CUR);
-	  sblkpos -= (partclone_blocksize(pctx) + p->pc_desc.options.checksum_size);
+
+	  sblkpos = p->pc_block_offset;
 	  fstat(*fd, &sbuf);
 	  fsize = sbuf.st_size;
 	  fprintf(stdout, "%s: size is %lld bytes, blocks (%lld bytes) start at %lld: ",
 		  argv[i], (long long) fsize, (long long) partclone_blocksize(pctx), (long long) sblkpos);
 	  fsize -= sblkpos;
-	  fprintf(stdout, " %lld blocks written",
-		  fsize / (partclone_blocksize(pctx) + p->pc_desc.options.checksum_size));
-	  if (fsize % (partclone_blocksize(pctx) + p->pc_desc.options.checksum_size)) {
-	    fprintf(stdout, ": %lld byte trailer\n", fsize % (partclone_blocksize(pctx) + p->pc_desc.options.checksum_size));
+	  partclone_written_blocks(pctx, fsize, &blkw, &extra);
+	  fprintf(stdout, " %lld blocks written", blkw);
+	  if (extra) {
+	    fprintf(stdout, "; %lld byte trailer\n", extra);
 	  } else {
 	    fprintf(stdout, "\n");
 	  }
@@ -97,7 +96,8 @@ main(int argc, char *argv[])
 
 	      cpos = lseek(*fd, 0, SEEK_CUR);
 	      eofpos = lseek(*fd, 0, SEEK_END);
-	      if (cpos == eofpos) {
+	      if ((eofpos == cpos) ||
+		  (eofpos - cpos) == p->pc_desc.options.checksum_size) {
 		fprintf(stdout, "%s: read last block at end of file\n",
 			argv[i]);
 	      } else {
