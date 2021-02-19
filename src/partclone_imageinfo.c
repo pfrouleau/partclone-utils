@@ -88,11 +88,23 @@ showImageInfo(const char filename[])
     int anomalies = 0;
 
     if ((error = partclone_open(filename, (char *)NULL, SYSDEP_OPEN_RO,
-                                &posix_dispatch, &pctx)) == 0)
+                                &posix_dispatch, &pctx)))
+    {
+        fprintf(stderr, "%s: cannot open image (error(%d) = %s)\n",
+            filename, error, strerror(error));
+        anomalies++;
+    }
+    else
     {
         pc_context_t *p = (pc_context_t *)pctx;
         uint64_t lastset = 0;
-        if (((error = partclone_verify(pctx)) == 0) || dontcare)
+        if (((error = partclone_verify(pctx))) && !dontcare)
+        {
+            fprintf(stderr, "%s: cannot verify image (error(%d) = %s)\n",
+                filename, error, strerror(error));
+            anomalies++;
+        }
+        else
         {
             unsigned char *iob;
 
@@ -101,7 +113,13 @@ showImageInfo(const char filename[])
 
             anomalies = countBlockTypes(p, filename, &lastset);
 
-            if ((iob = (unsigned char *)malloc(partclone_blocksize(pctx))))
+            if ((iob = (unsigned char *)malloc(partclone_blocksize(pctx))) == NULL)
+            {
+                fprintf(stderr, "%s: cannot malloc %" PRId64 " bytes\n", filename,
+                    partclone_blocksize(pctx));
+                anomalies++;
+            }
+            else
             {
                 int *fd = (int *)p->pc_fd;
                 off_t sblkpos;
@@ -114,79 +132,61 @@ showImageInfo(const char filename[])
                 fstat(*fd, &sbuf);
                 fsize = sbuf.st_size;
                 fprintf(stdout,
-                        "%s: size is %lld bytes, blocks (%lld bytes) start at %lld: ",
-                        filename, (long long)fsize,
-                        (long long)partclone_blocksize(pctx), (long long)sblkpos);
+                    "%s: size is %lld bytes, blocks (%lld bytes) start at %lld: ",
+                    filename, (long long)fsize,
+                    (long long)partclone_blocksize(pctx), (long long)sblkpos);
                 fsize -= sblkpos;
                 fprintf(stdout, " %ld blocks written",
-                        fsize / (partclone_blocksize(pctx) + CRC_SIZE));
+                    fsize / (partclone_blocksize(pctx) + CRC_SIZE));
                 if (fsize % (partclone_blocksize(pctx) + CRC_SIZE))
                 {
                     fprintf(stdout, ": %ld byte trailer\n",
-                            fsize % (partclone_blocksize(pctx) + CRC_SIZE));
+                        fsize % (partclone_blocksize(pctx) + CRC_SIZE));
                 }
                 else
                 {
                     fprintf(stdout, "\n");
                 }
-                if ((error = partclone_seek(pctx, lastset)) == 0)
+                if ((error = partclone_seek(pctx, lastset)))
                 {
-                    if ((error = partclone_readblocks(pctx, iob, 1)) == 0)
+                    fprintf(stderr,
+                        "%s: cannot seek to block %" PRIu64 ", error(%d) = %s\n",
+                        filename, lastset, error, strerror(error));
+                    anomalies++;
+                }
+                else
+                {
+                    if ((error = partclone_readblocks(pctx, iob, 1)))
+                    {
+                        fprintf(stderr,
+                            "%s: cannot read block %" PRIu64 ", error(%d) = %s\n",
+                            filename, lastset, error, strerror(error));
+                        anomalies++;
+                    }
+                    else
                     {
                         off_t cpos, eofpos;
 
                         cpos = lseek(*fd, 0, SEEK_CUR);
                         eofpos = lseek(*fd, 0, SEEK_END);
-                        if (cpos == eofpos)
+                        if (cpos != eofpos)
                         {
-                            fprintf(stdout, "%s: read last block at end of file\n",
-                                    filename);
+                            fprintf(stderr,
+                                "%s: position after last block = %ld, eof position = %ld, blocksize = %ld\n",
+                                filename, cpos, eofpos,
+                                partclone_blocksize(pctx) + CRC_SIZE);
+                            anomalies++;
                         }
                         else
                         {
-                            fprintf(stderr,
-                                    "%s: position after last block = %ld, eof position = %ld, blocksize = %ld\n",
-                                    filename, cpos, eofpos,
-                                    partclone_blocksize(pctx) + CRC_SIZE);
-                            anomalies++;
+                            fprintf(stdout, "%s: read last block at end of file\n",
+                                filename);
                         }
                     }
-                    else
-                    {
-                        fprintf(stderr,
-                                "%s: cannot read block %" PRIu64 ", error(%d) = %s\n",
-                                filename, lastset, error, strerror(error));
-                        anomalies++;
-                    }
-                }
-                else
-                {
-                    fprintf(stderr,
-                            "%s: cannot seek to block %" PRIu64 ", error(%d) = %s\n",
-                            filename, lastset, error, strerror(error));
-                    anomalies++;
                 }
                 free(iob);
             }
-            else
-            {
-                fprintf(stderr, "%s: cannot malloc %" PRId64 " bytes\n", filename,
-                        partclone_blocksize(pctx));
-                anomalies++;
-            }
         }
-        else
-        {
-            fprintf(stderr, "%s: cannot verify image (error(%d) = %s)\n",
-                    filename, error, strerror(error));
-            anomalies++;
-        }
-    }
-    else
-    {
-        fprintf(stderr, "%s: cannot open image (error(%d) = %s)\n",
-                filename, error, strerror(error));
-        anomalies++;
     }
     return anomalies;
 }
