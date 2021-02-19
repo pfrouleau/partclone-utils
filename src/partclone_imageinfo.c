@@ -25,9 +25,10 @@
 #include "libpartclone.h"
 #include "sysdep_posix.h"
 #include "partclone.h"
-#define	CRC_UNIT_BITS	8
-#define	CRC_TABLE_LEN	(1<<CRC_UNIT_BITS)
-#define	CRC_SIZE	4
+
+#define CRC_UNIT_BITS 8
+#define CRC_TABLE_LEN (1 << CRC_UNIT_BITS)
+#define CRC_SIZE      4
 
 typedef struct version_1_context {
     unsigned char	*v1_bitmap;		/* Usage bitmap */
@@ -42,30 +43,32 @@ int
 countBlockTypes(pc_context_t *p, const char filename[],
     uint64_t *lastset_)
 {
-    v1_context_t *v = (v1_context_t *) p->pc_verdep;
+    v1_context_t *v = (v1_context_t *)p->pc_verdep;
     uint64_t bmi;
     uint64_t bmscanned = 0, unset = 0, set = 0, strange = 0;
     int anomalies = 0, lastset = 0;
 
-    for (bmi = 0; bmi < p->pc_head.totalblock; ++bmi) {
-	switch (v->v1_bitmap[bmi]) {
-	    case 0:
-		++unset;
-		break;
-	    case 1:
-		++set;
-		lastset = bmi;
-		break;
-	    default:
-		++strange;
-		fprintf(stderr,
-	            "%s: block %lu (0x%016lx) bitmap %d (0x%02x)?\n",
-		    filename, bmi, bmi,
-		    v->v1_bitmap[bmi], v->v1_bitmap[bmi]);
-		++anomalies;
-		break;
-	}
-	++bmscanned;
+    for (bmi = 0; bmi < p->pc_head.totalblock; ++bmi)
+    {
+        switch (v->v1_bitmap[bmi])
+        {
+        case 0:
+            ++unset;
+            break;
+        case 1:
+            ++set;
+            lastset = bmi;
+            break;
+        default:
+            ++strange;
+            fprintf(stderr,
+                    "%s: block %lu (0x%016lx) bitmap %d (0x%02x)?\n",
+                    filename, bmi, bmi,
+                    v->v1_bitmap[bmi], v->v1_bitmap[bmi]);
+            ++anomalies;
+            break;
+        }
+        ++bmscanned;
     }
 
     fprintf(stdout,
@@ -84,77 +87,106 @@ showImageInfo(const char filename[])
     int dontcare = 0;
     int anomalies = 0;
 
-    if ((error = partclone_open(filename, (char *) NULL, SYSDEP_OPEN_RO,
-				&posix_dispatch, &pctx)) == 0) {
-      pc_context_t *p = (pc_context_t *) pctx;
-      uint64_t lastset = 0;
-      if (((error = partclone_verify(pctx)) == 0) || dontcare) {
-	unsigned char *iob;
+    if ((error = partclone_open(filename, (char *)NULL, SYSDEP_OPEN_RO,
+                                &posix_dispatch, &pctx)) == 0)
+    {
+        pc_context_t *p = (pc_context_t *)pctx;
+        uint64_t lastset = 0;
+        if (((error = partclone_verify(pctx)) == 0) || dontcare)
+        {
+            unsigned char *iob;
 
-      if (error)
-	p->pc_flags |= 4; //PC_VERIFIED
+            if (error)
+                p->pc_flags |= 4; //PC_VERIFIED
 
-	anomalies = countBlockTypes(p, filename, &lastset);
+            anomalies = countBlockTypes(p, filename, &lastset);
 
-	if ((iob = (unsigned char *) malloc(partclone_blocksize(pctx)))) {
-	  int *fd = (int *) p->pc_fd;
-	  off_t sblkpos;
-	  off_t fsize;
-	  struct stat sbuf;
-	  error = partclone_seek(pctx, 0);
-	  error = partclone_readblocks(pctx, iob, 1);
-	  sblkpos = lseek(*fd, 0, SEEK_CUR);
-	  sblkpos -= (partclone_blocksize(pctx) + CRC_SIZE);
-	  fstat(*fd, &sbuf);
-	  fsize = sbuf.st_size;
-	  fprintf(stdout, "%s: size is %lld bytes, blocks (%lld bytes) start at %lld: ",
-		  filename, (long long) fsize, (long long) partclone_blocksize(pctx), (long long) sblkpos);
-	  fsize -= sblkpos;
-	  fprintf(stdout, " %ld blocks written", fsize / (partclone_blocksize(pctx) + CRC_SIZE));
-	  if (fsize % (partclone_blocksize(pctx) + CRC_SIZE)) {
-	    fprintf(stdout, ": %ld byte trailer\n", fsize % (partclone_blocksize(pctx) + CRC_SIZE));
-	  } else {
-	    fprintf(stdout, "\n");
-	  }
-	  if ((error = partclone_seek(pctx, lastset)) == 0) {
-	    if ((error = partclone_readblocks(pctx, iob, 1)) == 0) {
-	      off_t cpos, eofpos;
+            if ((iob = (unsigned char *)malloc(partclone_blocksize(pctx))))
+            {
+                int *fd = (int *)p->pc_fd;
+                off_t sblkpos;
+                off_t fsize;
+                struct stat sbuf;
+                error = partclone_seek(pctx, 0);
+                error = partclone_readblocks(pctx, iob, 1);
+                sblkpos = lseek(*fd, 0, SEEK_CUR);
+                sblkpos -= (partclone_blocksize(pctx) + CRC_SIZE);
+                fstat(*fd, &sbuf);
+                fsize = sbuf.st_size;
+                fprintf(stdout,
+                        "%s: size is %lld bytes, blocks (%lld bytes) start at %lld: ",
+                        filename, (long long)fsize,
+                        (long long)partclone_blocksize(pctx), (long long)sblkpos);
+                fsize -= sblkpos;
+                fprintf(stdout, " %ld blocks written",
+                        fsize / (partclone_blocksize(pctx) + CRC_SIZE));
+                if (fsize % (partclone_blocksize(pctx) + CRC_SIZE))
+                {
+                    fprintf(stdout, ": %ld byte trailer\n",
+                            fsize % (partclone_blocksize(pctx) + CRC_SIZE));
+                }
+                else
+                {
+                    fprintf(stdout, "\n");
+                }
+                if ((error = partclone_seek(pctx, lastset)) == 0)
+                {
+                    if ((error = partclone_readblocks(pctx, iob, 1)) == 0)
+                    {
+                        off_t cpos, eofpos;
 
-	      cpos = lseek(*fd, 0, SEEK_CUR);
-	      eofpos = lseek(*fd, 0, SEEK_END);
-	      if (cpos == eofpos) {
-		fprintf(stdout, "%s: read last block at end of file\n",
-			filename);
-	      } else {
-		fprintf(stderr, "%s: position after last block = %ld, eof position = %ld, blocksize = %ld\n",
-			filename, cpos, eofpos, partclone_blocksize(pctx) + CRC_SIZE);
-		anomalies++;
-	      }
-	    } else {
-	      fprintf(stderr, "%s: cannot read block %" PRIu64 ", error(%d) = %s\n",
-		      filename, lastset, error, strerror(error));
-	      anomalies++;
-	    }
-	  } else {
-	    fprintf(stderr, "%s: cannot seek to block %" PRIu64 ", error(%d) = %s\n",
-		    filename, lastset, error, strerror(error));
-	    anomalies++;
-	  }
-	  free(iob);
-	} else {
-	  fprintf(stderr, "%s: cannot malloc %" PRId64 " bytes\n", filename,
-		  partclone_blocksize(pctx));
-	  anomalies++;
-	}
-      } else {
-	fprintf(stderr, "%s: cannot verify image (error(%d) = %s)\n",
-		filename, error, strerror(error));
-	anomalies++;
-      }
-    } else {
-      fprintf(stderr, "%s: cannot open image (error(%d) = %s)\n",
-	      filename, error, strerror(error));
-      anomalies++;
+                        cpos = lseek(*fd, 0, SEEK_CUR);
+                        eofpos = lseek(*fd, 0, SEEK_END);
+                        if (cpos == eofpos)
+                        {
+                            fprintf(stdout, "%s: read last block at end of file\n",
+                                    filename);
+                        }
+                        else
+                        {
+                            fprintf(stderr,
+                                    "%s: position after last block = %ld, eof position = %ld, blocksize = %ld\n",
+                                    filename, cpos, eofpos,
+                                    partclone_blocksize(pctx) + CRC_SIZE);
+                            anomalies++;
+                        }
+                    }
+                    else
+                    {
+                        fprintf(stderr,
+                                "%s: cannot read block %" PRIu64 ", error(%d) = %s\n",
+                                filename, lastset, error, strerror(error));
+                        anomalies++;
+                    }
+                }
+                else
+                {
+                    fprintf(stderr,
+                            "%s: cannot seek to block %" PRIu64 ", error(%d) = %s\n",
+                            filename, lastset, error, strerror(error));
+                    anomalies++;
+                }
+                free(iob);
+            }
+            else
+            {
+                fprintf(stderr, "%s: cannot malloc %" PRId64 " bytes\n", filename,
+                        partclone_blocksize(pctx));
+                anomalies++;
+            }
+        }
+        else
+        {
+            fprintf(stderr, "%s: cannot verify image (error(%d) = %s)\n",
+                    filename, error, strerror(error));
+            anomalies++;
+        }
+    }
+    else
+    {
+        fprintf(stderr, "%s: cannot open image (error(%d) = %s)\n",
+                filename, error, strerror(error));
+        anomalies++;
     }
     return anomalies;
 }
@@ -164,12 +196,12 @@ main(int argc, char *argv[])
 {
     int i;
 
-    for (i=1; i<argc; i++) {
-	int anomalies = showImageInfo(argv[i]);
-	if (anomalies) {
-	    fprintf(stdout, "!!! %s: %d problems\n", argv[i], anomalies);
-	} else {
-	    fprintf(stdout, "%s: OK\n", argv[i]);
-	}
+    for (i = 1; i < argc; i++) {
+        int anomalies = showImageInfo(argv[i]);
+        if (anomalies) {
+            fprintf(stdout, "!!! %s: %d problems\n", argv[i], anomalies);
+        } else {
+            fprintf(stdout, "%s: OK\n", argv[i]);
+        }
     }
 }
