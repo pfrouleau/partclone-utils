@@ -39,6 +39,44 @@ typedef struct version_1_context {
 } v1_context_t;
 
 int
+countBlockTypes(pc_context_t *p, const char filename[],
+    uint64_t *lastset_)
+{
+    v1_context_t *v = (v1_context_t *) p->pc_verdep;
+    uint64_t bmi;
+    uint64_t bmscanned = 0, unset = 0, set = 0, strange = 0;
+    int anomalies = 0, lastset = 0;
+
+    for (bmi = 0; bmi < p->pc_head.totalblock; ++bmi) {
+	switch (v->v1_bitmap[bmi]) {
+	    case 0:
+		++unset;
+		break;
+	    case 1:
+		++set;
+		lastset = bmi;
+		break;
+	    default:
+		++strange;
+		fprintf(stderr,
+	            "%s: block %lu (0x%016lx) bitmap %d (0x%02x)?\n",
+		    filename, bmi, bmi,
+		    v->v1_bitmap[bmi], v->v1_bitmap[bmi]);
+		++anomalies;
+		break;
+	}
+	++bmscanned;
+    }
+
+    fprintf(stdout,
+        "%s: %llu blocks, %" PRIu64 " blocks scanned, %" PRIu64 " unset, %" PRIu64 " set, %" PRIu64 " strange\n",
+        filename, p->pc_head.totalblock, bmscanned, unset, set, strange);
+
+    *lastset_ = lastset;
+    return anomalies;
+}
+
+int
 showImageInfo(const char filename[])
 {
     void *pctx;
@@ -48,33 +86,16 @@ showImageInfo(const char filename[])
 
     if ((error = partclone_open(filename, (char *) NULL, SYSDEP_OPEN_RO,
 				&posix_dispatch, &pctx)) == 0) {
-      uint64_t bmscanned = 0, unset = 0, set = 0, strange = 0;
+      pc_context_t *p = (pc_context_t *) pctx;
       uint64_t lastset = 0;
       if (((error = partclone_verify(pctx)) == 0) || dontcare) {
-	pc_context_t *p = (pc_context_t *) pctx;
-	v1_context_t *v = (v1_context_t *) p->pc_verdep;
-	uint64_t bmi;
 	unsigned char *iob;
 
-	if (dontcare && error)
-	  p->pc_flags |= 4;
-	for (bmi = 0; bmi < p->pc_head.totalblock; bmi++) {
-	  switch (v->v1_bitmap[bmi]) {
-	  case 0:
-	    unset++; break;
-	  case 1:
-	    set++; lastset = bmi; break;
-	  default:
-	    strange++;
-	    fprintf(stderr, "%s: block %lu (0x%016lx) bitmap %d (0x%02x)?\n", filename, bmi, bmi,
-		    v->v1_bitmap[bmi], v->v1_bitmap[bmi]);
-	    anomalies++;
-	    break;
-	  }
-	  bmscanned++;
-	}
-	fprintf(stdout, "%s: %llu blocks, %" PRIu64 " blocks scanned, %" PRIu64 " unset, %" PRIu64 " set, %" PRIu64 " strange\n",
-		filename, p->pc_head.totalblock, bmscanned, unset, set, strange);
+      if (error)
+	p->pc_flags |= 4; //PC_VERIFIED
+
+	anomalies = countBlockTypes(p, filename, &lastset);
+
 	if ((iob = (unsigned char *) malloc(partclone_blocksize(pctx)))) {
 	  int *fd = (int *) p->pc_fd;
 	  off_t sblkpos;
