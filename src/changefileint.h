@@ -1,5 +1,5 @@
 /*
- * changefileint.h	- Internals to the changefile library.
+ * changefileint.h - Internals to the changefile library.
  */
 /*
  * Copyright (c) 2014, Ideal World, Inc.  All Rights Reserved.

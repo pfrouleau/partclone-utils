@@ -1,5 +1,5 @@
 /*
- * partclone_imageinfo	- A cursory check that a file looks OK.
+ * partclone_imageinfo.c - A cursory check that a file looks OK.
  */
 /*
  * Copyright (c) 2013, Ideal World, Inc.  All Rights Reserved.

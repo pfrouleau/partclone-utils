@@ -1,5 +1,5 @@
 /*
- * libpartclone.c	- Access individual blocks in a partclone image.
+ * libpartclone.c - Access individual blocks in a partclone image.
  */
 /*
  * Copyright (c) 2010, Ideal World, Inc.  All Rights Reserved.
@@ -22,11 +22,9 @@
 
 static const char cf_trailer[] = ".cf";
 
-/*
- * pc_context_t	- Handle to access partclone images.  Used internally.
- */
 struct version_dispatch_table;
 struct change_file_context;
+
 #define PC_OPEN         0x0001  /* Image is open. */
 #define PC_CF_OPEN      0x0002  /* Change file is open */
 #define PC_VERIFIED     0x0004  /* Image verified */
@@ -117,7 +115,7 @@ typedef struct version_1_context {
 } v1_context_t;
 
 /*
- * v1_init	- Initialize version 1 file handling.
+ * Initialize version 1 file handling.
  *
  * - Allocate and initialize version 1 handle.
  * - Precalculate the CRC table.
@@ -226,7 +224,7 @@ precalculate_sumcount(pc_context_t *pcp) {
 }
 
 /*
- * v1_verify	- Verify the currently open file.
+ * Verify the currently open file.
  *
  * - Load the bitmap
  * - Precalculate the count of preceding valid blocks.
@@ -289,7 +287,7 @@ v1_verify(pc_context_t *pcp) {
 }
 
 /*
- * v1_finish	- Finish version-specific handling.
+ * Finish version-specific handling.
  *
  * Free structures.
  */
@@ -313,7 +311,7 @@ v1_finish(pc_context_t *pcp) {
 }
 
 /*
- * v1_seek	- Version-specific handling for seeking to a particular block.
+ * Version-specific handling for seeking to a particular block.
  *
  * Update the number of preceding valid blocks.
  */
@@ -343,8 +341,7 @@ v1_seek(pc_context_t *pcp, uint64_t blockno) {
 }
 
 /*
- * rblock2offset	- Calculate offset in image file of particular
- *			  block.
+ * Calculate offset in image file of particular block.
  */
 static inline int64_t
 rblock2offset(pc_context_t *pcp, uint64_t rbnum) {
@@ -381,7 +378,7 @@ v1_crc32(v1_context_t *v1p, uint32_t crc, char *buf, size_t size) {
 }
 
 /*
- * v1_readblock	- Read the block at the current position.
+ * Read the block at the current position.
  */
 static int
 v1_readblock(pc_context_t *pcp, void *buffer) {
@@ -429,7 +426,7 @@ v1_readblock(pc_context_t *pcp, void *buffer) {
 }
 
 /*
- * v1_blockused	- Is the current block in use?
+ * Is the current block in use?
  */
 static int
 v1_blockused(pc_context_t *pcp) {
@@ -446,7 +443,7 @@ v1_blockused(pc_context_t *pcp) {
 }
 
 /*
- * v1_writeblock	- Write block at current location.
+ * Write block at current location.
  */
 static int
 v1_writeblock(pc_context_t *pcp, void *buffer) {
@@ -489,7 +486,7 @@ v1_writeblock(pc_context_t *pcp, void *buffer) {
 }
 
 /*
- * v1_sync	- Flush changes to change file
+ * Flush changes to change file
  */
 static int
 v1_sync(pc_context_t *pcp) {
@@ -581,7 +578,7 @@ static const v_dispatch_table_t version_table[] = {
 };
 
 /*
- * partclone_close()	- Close the image handle.
+ * Close the image handle.
  */
 int
 partclone_close(void *rp) {
@@ -616,8 +613,7 @@ partclone_close(void *rp) {
 }
 
 /*
- * partclone_open	- Open an image handle using the system-specific
- *			  interfaces.
+ * Open an image handle using the system-specific interfaces.
  */
 int
 partclone_open(const char *path, const char *cfpath, sysdep_open_mode_t omode,
@@ -663,7 +659,7 @@ partclone_open(const char *path, const char *cfpath, sysdep_open_mode_t omode,
 }
 
 /*
- * partclone_tolerant_mode	- Set tolerant mode
+ * Set tolerant mode
  */
 void
 partclone_tolerant_mode(void *rp) {
@@ -675,7 +671,7 @@ partclone_tolerant_mode(void *rp) {
 }
 
 /*
- * partclone_verify	- Determine the version of the file and verify it.
+ * Determine the version of the file and verify it.
  */
 int
 partclone_verify(void *rp) {
@@ -750,7 +746,7 @@ partclone_verify(void *rp) {
 }
 
 /*
- * partclone_blocksize	- Return the blocksize.
+ * Return the blocksize.
  */
 int64_t
 partclone_blocksize(void *rp) {
@@ -759,7 +755,7 @@ partclone_blocksize(void *rp) {
 }
 
 /*
- * partclone_blockcount	- Return the total count of blocks.
+ * Return the total count of blocks.
  */
 int64_t
 partclone_blockcount(void *rp) {
@@ -768,7 +764,7 @@ partclone_blockcount(void *rp) {
 }
 
 /*
- * partclone_seek	- Seek to a particular block.
+ * Seek to a particular block.
  */
 int
 partclone_seek(void *rp, uint64_t blockno) {
@@ -788,7 +784,7 @@ partclone_seek(void *rp, uint64_t blockno) {
 }
 
 /*
- * partclone_tell	- Obtain the current position.
+ * Obtain the current position.
  */
 uint64_t
 partclone_tell(void *rp) {
@@ -798,7 +794,7 @@ partclone_tell(void *rp) {
 }
 
 /*
- * partclone_readblocks	- Read blocks from the current position.
+ * Read blocks from the current position.
  */
 int
 partclone_readblocks(void *rp, void *buffer, uint64_t nblocks) {
@@ -825,7 +821,7 @@ partclone_readblocks(void *rp, void *buffer, uint64_t nblocks) {
 }
 
 /*
- * partclone_block_used	- Determine if the current block is used.
+ * Determine if the current block is used.
  */
 int
 partclone_block_used(void *rp) {
@@ -835,7 +831,7 @@ partclone_block_used(void *rp) {
 }
 
 /*
- * partclone_writeblocks	- Write blocks to the current position.
+ * Write blocks to the current position.
  */
 int
 partclone_writeblocks(void *rp, void *buffer, uint64_t nblocks) {
@@ -863,7 +859,7 @@ partclone_writeblocks(void *rp, void *buffer, uint64_t nblocks) {
 }
 
 /*
- * partclone_sync	- Commit changes to image.
+ * Commit changes to image.
  */
 int
 partclone_sync(void *rp) {
@@ -874,7 +870,7 @@ partclone_sync(void *rp) {
 }
 
 /*
- * partclone_probe	- Is this a partclone image?
+ * Is this a partclone image?
  */
 int
 partclone_probe(const char *path, const sysdep_dispatch_t *sysdep) {

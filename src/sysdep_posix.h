@@ -1,5 +1,5 @@
 /*
- * sysdep_posix.h	- POSIX system dependent module interface.
+ * sysdep_posix.h - POSIX system dependent module interface.
  */
 /*
  * Copyright (c) 2010, Ideal World, Inc.  All Rights Reserved.

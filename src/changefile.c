@@ -1,5 +1,5 @@
 /*
- * changefile.c	- Changefile handling.
+ * changefile.c - Changefile handling.
  */
 /*
  * Copyright (c) 2011, Ideal World, Inc.  All Rights Reserved.
@@ -13,7 +13,7 @@
 #include <string.h>
 
 /*
- * cf_init	- Initialize change file handling.
+ * Initialize change file handling.
  *
  * Allocate and initialize change file handle.
  */
@@ -59,7 +59,7 @@ cf_init(const char *cfpath, const sysdep_dispatch_t *sysdep, uint64_t blocksize,
 }
 
 /*
- * cf_verify	- Verify the change file.
+ * Verify the change file.
  *
  * - Load the blockmap.
  */
@@ -121,7 +121,7 @@ cf_verify(void *vcp) {
 }
 
 /*
- * cf_create	- Create change file if necessary.
+ * Create change file if necessary.
  */
 int
 cf_create(const char *cfpath, const sysdep_dispatch_t *sysdep,
@@ -182,7 +182,7 @@ cf_create(const char *cfpath, const sysdep_dispatch_t *sysdep,
 }
 
 /*
- * cf_sync	- Sync change file changes to image.
+ * Sync change file changes to image.
  */
 int
 cf_sync(void *vcp) {
@@ -217,7 +217,7 @@ cf_sync(void *vcp) {
 }
 
 /*
- * cf_finish	- Finish change file handling.
+ * Finish change file handling.
  *
  * Free structures.
  */
@@ -237,7 +237,7 @@ cf_finish(void *vcp) {
 }
 
 /*
- * cf_seek	- Change file handling for seeking to a particular block.
+ * Change file handling for seeking to a particular block.
  */
 int
 cf_seek(void *vcp, uint64_t blockno) {
@@ -268,7 +268,7 @@ cf_crc32(cf_context_t *cfp, uint32_t crc, unsigned char *buf, uint64_t size) {
 }
 
 /*
- * cf_readblock	- Read the block at the current position.
+ * Read the block at the current position.
  */
 int
 cf_readblock(void *vcp, void *buffer) {
@@ -323,7 +323,7 @@ cf_readblock(void *vcp, void *buffer) {
 }
 
 /*
- * cf_blockused	- Is the current block in use?
+ * Is the current block in use?
  */
 int
 cf_blockused(void *vcp) {
@@ -333,7 +333,7 @@ cf_blockused(void *vcp) {
 }
 
 /*
- * cf_writeblock	- Write block at current location.
+ * Write block at current location.
  */
 int
 cf_writeblock(void *vcp, void *buffer) {

@@ -1,5 +1,5 @@
 /*
- * librawimage.h	- Interfaces to raw image library.
+ * librawimage.h - Interfaces to raw image library.
  */
 /*
  * Copyright (c) 2014, Ideal World, Inc.  All Rights Reserved.

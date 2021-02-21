@@ -1,5 +1,5 @@
 /*
- * libntfsclone.c	- Access individual blocks in a ntfsclone image.
+ * libntfsclone.c - Access individual blocks in a ntfsclone image.
  */
 /*
  * Copyright (c) 2010, Ideal World, Inc.  All Rights Reserved.
@@ -23,7 +23,7 @@
 static const char cf_trailer[] = ".cf";
 
 /*
- * nc_context_t	- Handle to access partclone images.  Used internally.
+ * Handle to access partclone images.  Used internally.
  */
 struct version_dispatch_table;
 struct change_file_context;
@@ -147,7 +147,7 @@ bitmap_bit_value(unsigned char *bitmap, uint64_t bit) {
 }
 
 /*
- * v10_init	- Initialize version 10 file handling.
+ * Initialize version 10 file handling.
  *
  * - Allocate and initialize version 10 handle.
  * - Precalculate the CRC table.
@@ -195,7 +195,7 @@ v10_init(nc_context_t *ntcp) {
 }
 
 /*
- * v10_verify	- Verify the currently open file.
+ * Verify the currently open file.
  *
  * - Load the bitmap
  * - Precalculate the count of preceding valid blocks.
@@ -331,7 +331,7 @@ v10_verify(nc_context_t *ntcp) {
 }
 
 /*
- * v10_finish	- Finish version-specific handling.
+ * Finish version-specific handling.
  *
  * Free structures.
  */
@@ -355,7 +355,7 @@ v10_finish(nc_context_t *ntcp) {
 }
 
 /*
- * v10_seek	- Version-specific handling for seeking to a particular block.
+ * Version-specific handling for seeking to a particular block.
  *
  * Update the number of preceding valid blocks.
  */
@@ -400,7 +400,7 @@ v10_seek(nc_context_t *ntcp, uint64_t blockno) {
 }
 
 /*
- * seek2cluster	- Seek to the specified cluster in the image.
+ * Seek to the specified cluster in the image.
  */
 static inline int
 seek2cluster(nc_context_t *ntcp, uint64_t cnum) {
@@ -466,7 +466,7 @@ seek2cluster(nc_context_t *ntcp, uint64_t cnum) {
 }
 
 /*
- * v10_readblock	- Read the block at the current position.
+ * Read the block at the current position.
  */
 static int
 v10_readblock(nc_context_t *ntcp, void *buffer) {
@@ -515,7 +515,7 @@ v10_readblock(nc_context_t *ntcp, void *buffer) {
 }
 
 /*
- * v10_blockused	- Is the current block in use?
+ * Is the current block in use?
  */
 static int
 v10_blockused(nc_context_t *ntcp) {
@@ -532,7 +532,7 @@ v10_blockused(nc_context_t *ntcp) {
 }
 
 /*
- * v10_writeblock	- Write block at current location.
+ * Write block at current location.
  */
 static int
 v10_writeblock(nc_context_t *ntcp, void *buffer) {
@@ -576,7 +576,7 @@ v10_writeblock(nc_context_t *ntcp, void *buffer) {
 }
 
 /*
- * v10_sync	- Flush changes to change file
+ * Flush changes to change file
  */
 static int
 v10_sync(nc_context_t *ntcp) {
@@ -601,7 +601,7 @@ static const v_dispatch_table_t version_table[] = {
 };
 
 /*
- * ntfsclone_close()	- Close the image handle.
+ * Close the image handle.
  */
 int
 ntfsclone_close(void *rp) {
@@ -636,8 +636,7 @@ ntfsclone_close(void *rp) {
 }
 
 /*
- * ntfsclone_open	- Open an image handle using the system-specific
- *			  interfaces.
+ * Open an image handle using the system-specific interfaces.
  */
 int
 ntfsclone_open(const char *path, const char *cfpath, sysdep_open_mode_t omode,
@@ -683,7 +682,7 @@ ntfsclone_open(const char *path, const char *cfpath, sysdep_open_mode_t omode,
 }
 
 /*
- * ntfsclone_tolerant_mode	- Set tolerant mode
+ * Set tolerant mode
  */
 void
 ntfsclone_tolerant_mode(void *rp) {
@@ -695,7 +694,7 @@ ntfsclone_tolerant_mode(void *rp) {
 }
 
 /*
- * ntfsclone_verify	- Determine the version of the file and verify it.
+ * Determine the version of the file and verify it.
  */
 static int
 ntfsclone_verify_common(void *rp, int full) {
@@ -786,7 +785,7 @@ ntfsclone_verify(void *rp) {
 }
 
 /*
- * ntfsclone_blocksize	- Return the blocksize.
+ * Return the blocksize.
  */
 int64_t
 ntfsclone_blocksize(void *rp) {
@@ -795,7 +794,7 @@ ntfsclone_blocksize(void *rp) {
 }
 
 /*
- * ntfsclone_blockcount	- Return the total count of blocks.
+ * Return the total count of blocks.
  */
 int64_t
 ntfsclone_blockcount(void *rp) {
@@ -804,7 +803,7 @@ ntfsclone_blockcount(void *rp) {
 }
 
 /*
- * ntfsclone_seek	- Seek to a particular block.
+ * Seek to a particular block.
  */
 int
 ntfsclone_seek(void *rp, uint64_t blockno) {
@@ -824,7 +823,7 @@ ntfsclone_seek(void *rp, uint64_t blockno) {
 }
 
 /*
- * ntfsclone_tell	- Obtain the current position.
+ * Obtain the current position.
  */
 uint64_t
 ntfsclone_tell(void *rp) {
@@ -834,7 +833,7 @@ ntfsclone_tell(void *rp) {
 }
 
 /*
- * ntfsclone_readblocks	- Read blocks from the current position.
+ * Read blocks from the current position.
  */
 int
 ntfsclone_readblocks(void *rp, void *buffer, uint64_t nblocks) {
@@ -861,7 +860,7 @@ ntfsclone_readblocks(void *rp, void *buffer, uint64_t nblocks) {
 }
 
 /*
- * ntfsclone_block_used	- Determine if the current block is used.
+ * Determine if the current block is used.
  */
 int
 ntfsclone_block_used(void *rp) {
@@ -872,7 +871,7 @@ ntfsclone_block_used(void *rp) {
 }
 
 /*
- * ntfsclone_writeblocks	- Write blocks to the current position.
+ * Write blocks to the current position.
  */
 int
 ntfsclone_writeblocks(void *rp, void *buffer, uint64_t nblocks) {
@@ -900,7 +899,7 @@ ntfsclone_writeblocks(void *rp, void *buffer, uint64_t nblocks) {
 }
 
 /*
- * ntfsclone_sync	- Commit changes to image.
+ * Commit changes to image.
  */
 int
 ntfsclone_sync(void *rp) {
@@ -911,7 +910,7 @@ ntfsclone_sync(void *rp) {
 }
 
 /*
- * ntfsclone_probe	- Is this a ntfsclone image?
+ * Is this a ntfsclone image?
  */
 int
 ntfsclone_probe(const char *path, const sysdep_dispatch_t *sysdep) {

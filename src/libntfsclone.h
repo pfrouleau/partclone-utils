@@ -1,5 +1,5 @@
 /*
- * libntfsclone.h	- Interfaces to ntfsclone library.
+ * libntfsclone.h - Interfaces to ntfsclone library.
  */
 /*
  * Copyright (c) 2010, Ideal World, Inc.  All Rights Reserved.

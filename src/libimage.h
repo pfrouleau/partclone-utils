@@ -1,5 +1,5 @@
 /*
- * libimage.h	- Interfaces to image library.
+ * libimage.h - Interfaces to image library.
  */
 /*
  * Copyright (c) 2011, Ideal World, Inc.  All Rights Reserved.
