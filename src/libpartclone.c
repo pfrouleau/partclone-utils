@@ -172,7 +172,8 @@ v1_init(pc_context_t *pcp) {
             v1p->v1_bitmap_factor = V1_DEFAULT_FACTOR;
         }
     }
-    return (error);
+
+    return error;
 }
 
 static int
@@ -220,7 +221,8 @@ precalculate_sumcount(pc_context_t *pcp) {
                 pcp->pc_flags |= PC_CF_VERIFIED;
         }
     }
-    return (error);
+
+    return error;
 }
 
 /*
@@ -282,7 +284,8 @@ v1_verify(pc_context_t *pcp) {
             }
         }
     }
-    return (error);
+
+    return error;
 }
 
 /*
@@ -305,7 +308,8 @@ v1_finish(pc_context_t *pcp) {
         pcp->pc_flags &= ~PC_HAVE_VERDEP;
         error = (pcp->pc_cf_handle) ? cf_finish(pcp->pc_cf_handle) : 0;
     }
-    return (error);
+
+    return error;
 }
 
 /*
@@ -334,7 +338,8 @@ v1_seek(pc_context_t *pcp, uint64_t blockno) {
         }
         error = (pcp->pc_cf_handle) ? cf_seek(pcp->pc_cf_handle, blockno) : 0;
     }
-    return (error);
+
+    return error;
 }
 
 /*
@@ -371,7 +376,8 @@ v1_crc32(v1_context_t *v1p, uint32_t crc, char *buf, size_t size) {
         tmp    = crc ^ (((uint32_t)c) & 0x000000ffL);
         crc    = (crc >> 8) ^ v1p->v1_crc_tab32[tmp & 0xff];
     }
-    return (crc);
+
+    return crc;
 }
 
 /*
@@ -418,7 +424,8 @@ v1_readblock(pc_context_t *pcp, void *buffer) {
             }
         }
     }
-    return (error);
+
+    return error;
 }
 
 /*
@@ -434,7 +441,8 @@ v1_blockused(pc_context_t *pcp) {
                      ? 1
                      : v1p->v1_bitmap[pcp->pc_curblock];
     }
-    return (retval);
+
+    return retval;
 }
 
 /*
@@ -476,7 +484,8 @@ v1_writeblock(pc_context_t *pcp, void *buffer) {
             error = cf_writeblock(pcp->pc_cf_handle, buffer);
         }
     }
-    return (error);
+
+    return error;
 }
 
 /*
@@ -488,7 +497,8 @@ v1_sync(pc_context_t *pcp) {
     if (PCTX_WRITEREADY(pcp)) {
         error = cf_sync(pcp->pc_cf_handle);
     }
-    return (error);
+
+    return error;
 }
 
 static int
@@ -556,7 +566,8 @@ v2_verify(pc_context_t *pcp) {
             }
         }
     }
-    return (error);
+
+    return error;
 }
 
 /*
@@ -600,7 +611,8 @@ partclone_close(void *rp) {
         (void)(*pcp->pc_sysdep->sys_free)(pcp);
         error = 0;
     }
-    return (error);
+
+    return error;
 }
 
 /*
@@ -646,7 +658,8 @@ partclone_open(const char *path, const char *cfpath, sysdep_open_mode_t omode,
     if (error) {
         *rpp = (void *)NULL;
     }
-    return (error);
+
+    return error;
 }
 
 /*
@@ -732,7 +745,8 @@ partclone_verify(void *rp) {
                 error = EIO;
         }
     }
-    return (error);
+
+    return error;
 }
 
 /*
@@ -741,7 +755,7 @@ partclone_verify(void *rp) {
 int64_t
 partclone_blocksize(void *rp) {
     pc_context_t *pcp = (pc_context_t *)rp;
-    return ((PCTX_VERIFIED(pcp)) ? pcp->pc_head.block_size : -1);
+    return (PCTX_VERIFIED(pcp)) ? pcp->pc_head.block_size : -1;
 }
 
 /*
@@ -750,7 +764,7 @@ partclone_blocksize(void *rp) {
 int64_t
 partclone_blockcount(void *rp) {
     pc_context_t *pcp = (pc_context_t *)rp;
-    return ((PCTX_VERIFIED(pcp)) ? pcp->pc_head.totalblock : -1);
+    return (PCTX_VERIFIED(pcp)) ? pcp->pc_head.totalblock : -1;
 }
 
 /*
@@ -769,7 +783,8 @@ partclone_seek(void *rp, uint64_t blockno) {
             pcp->pc_curblock = blockno;
         }
     }
-    return (error);
+
+    return error;
 }
 
 /*
@@ -779,7 +794,7 @@ uint64_t
 partclone_tell(void *rp) {
     pc_context_t *pcp = (pc_context_t *)rp;
 
-    return ((PCTX_READREADY(pcp)) ? pcp->pc_curblock : ~0);
+    return (PCTX_READREADY(pcp)) ? pcp->pc_curblock : ~0;
 }
 
 /*
@@ -805,7 +820,8 @@ partclone_readblocks(void *rp, void *buffer, uint64_t nblocks) {
             cbp += pcp->pc_head.block_size;
         }
     }
-    return (error);
+
+    return error;
 }
 
 /*
@@ -814,8 +830,8 @@ partclone_readblocks(void *rp, void *buffer, uint64_t nblocks) {
 int
 partclone_block_used(void *rp) {
     pc_context_t *pcp = (pc_context_t *)rp;
-    return ((PCTX_READREADY(pcp)) ? (*pcp->pc_dispatch->version_blockused)(pcp)
-                                  : BLOCK_ERROR);
+    return (PCTX_READREADY(pcp)) ? (*pcp->pc_dispatch->version_blockused)(pcp)
+                                 : BLOCK_ERROR;
 }
 
 /*
@@ -842,7 +858,8 @@ partclone_writeblocks(void *rp, void *buffer, uint64_t nblocks) {
             cbp += pcp->pc_head.block_size;
         }
     }
-    return (error);
+
+    return error;
 }
 
 /*
@@ -852,8 +869,8 @@ int
 partclone_sync(void *rp) {
     pc_context_t *pcp = (pc_context_t *)rp;
 
-    return ((PCTX_WRITEREADY(pcp)) ? (*pcp->pc_dispatch->version_sync)(pcp)
-                                   : EINVAL);
+    return (PCTX_WRITEREADY(pcp)) ? (*pcp->pc_dispatch->version_sync)(pcp)
+                                  : EINVAL;
 }
 
 /*
@@ -868,7 +885,8 @@ partclone_probe(const char *path, const sysdep_dispatch_t *sysdep) {
         error = partclone_verify(testh);
         partclone_close(testh);
     }
-    return (error);
+
+    return error;
 }
 
 /*
