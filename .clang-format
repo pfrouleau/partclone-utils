@@ -1,0 +1,16 @@
+BasedOnStyle: LLVM
+IndentWidth: 4
+AlwaysBreakAfterReturnType: AllDefinitions
+BraceWrapping:
+  AfterControlStatement: Never
+IncludeBlocks: Merge
+IndentPPDirectives: AfterHash  # Also indent #include
+#InsertTrailingCommas: Wrapped
+SpacesBeforeTrailingComments: 4
+AlignConsecutiveAssignments: true
+AlignConsecutiveBitFields: true
+AlignConsecutiveDeclarations: true
+AlignConsecutiveMacros: true
+AlignEscapedNewlines: Left
+AllowShortFunctionsOnASingleLine: None
+IndentGotoLabels: false
