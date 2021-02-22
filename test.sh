@@ -19,7 +19,7 @@ TEST_FILE_SRC=/tmp/test_file
 
 initial_setup() {
     # Load the Network Block Device kernel module
-    modprobe nbd
+    sudo modprobe nbd
 
     # Create test file
     sudo sh -c "echo 'This is a test file' > $TEST_FILE_SRC" 
