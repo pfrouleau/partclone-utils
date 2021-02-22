@@ -13,6 +13,8 @@
 #ifndef _CHANGEFILEINT_H_
 #define _CHANGEFILEINT_H_ 1
 
+#include "sysdep_int.h"
+
 #define CRC_UNIT_BITS 8
 #define CRC_TABLE_LEN (1 << CRC_UNIT_BITS)
 
