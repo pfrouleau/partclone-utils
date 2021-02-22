@@ -86,8 +86,12 @@ typedef struct nbd_context {
  */
 static void
 loginit(nbd_context_t *ncp) {
-    if (ncp->svc_daemon_mode)
+    if (ncp->svc_daemon_mode) {
+        printf("Launched in daemon mode: All logging output being written to "
+               "the system log.\n");
+
         openlog(ncp->svc_progname, LOG_PID, LOG_DAEMON);
+    }
 }
 
 /*
@@ -823,10 +827,6 @@ main(int argc, char *argv[]) {
             error = 1;
             break;
         }
-    }
-    if (nc.svc_daemon_mode) {
-        printf("Launched in daemon mode: All logging output being written to "
-               "the system log.\n");
     }
 
     /*
