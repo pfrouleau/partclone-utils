@@ -826,16 +826,18 @@ main(int argc, char *argv[]) {
             break;
         }
     }
-    if (nc.svc_daemon_mode) {
-        printf("Launched in daemon mode: All logging output being written to "
-               "the system log.\n");
-    }
 
     /*
      * If successful, then do it!.
      */
     if (!error && nc.nbd_dev && file) {
         void *pctx = (void *)NULL;
+
+        if (nc.svc_daemon_mode) {
+            printf("Launched in daemon mode: All logging output being written to "
+                "the system log.\n");
+        }
+
         /*
          * Open the image.
          */
