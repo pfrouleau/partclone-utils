@@ -771,6 +771,7 @@ main(int argc, char *argv[]) {
     extern char * optarg;
     char *        file  = (char *)NULL;
     char *        cfile = (char *)NULL;
+    int           show_help = 0;
     int           error = 0;
     nbd_context_t nc;
 
@@ -783,7 +784,7 @@ main(int argc, char *argv[]) {
     /*
      * Parse options.
      */
-    while ((option = getopt(argc, argv, "c:d:f:v:i:m:t:DrwTR")) != -1) {
+    while ((option = getopt(argc, argv, "c:d:f:v:i:m:t:DhrwTR")) != -1) {
         switch (option) {
         case 'c':
             cfile = optarg;
@@ -793,6 +794,9 @@ main(int argc, char *argv[]) {
             break;
         case 'f':
             file = optarg;
+            break;
+        case 'h':
+            show_help = 1;
             break;
         case 'v':
             sscanf(optarg, "%d", &nc.svc_verbose);
@@ -830,7 +834,7 @@ main(int argc, char *argv[]) {
     /*
      * If successful, then do it!.
      */
-    if (!error && nc.nbd_dev && file) {
+    if (!error && !show_help && nc.nbd_dev && file) {
         void *pctx = (void *)NULL;
 
         if (nc.svc_daemon_mode) {
@@ -914,7 +918,7 @@ main(int argc, char *argv[]) {
     } else {
         fprintf(stderr,
                 "%s: usage %s -d disk -f file [-c cfile] "
-                "[-m mount [-t type]] [-i timeout] [-v verbose] [-Drw]\n",
+                "[-m mount [-t type]] [-i timeout] [-v verbose] [-Dhrw]\n",
                 argv[0], argv[0]);
     }
 
