@@ -525,7 +525,7 @@ v2_verify(pc_context_t *pcp) {
                 bitmap_size++;
 
             pcp->pc_head.head_size = sizeof(pcp->pc_head_v2) + bitmap_size +
-                                     pcp->pc_head.checksum_size;
+                                     CRC_SIZE;
 
             pcp->pc_flags |= PC_HEAD_VALID;
             /*
