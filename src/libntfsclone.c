@@ -635,6 +635,26 @@ ntfsclone_close(void *rp) {
     return error;
 }
 
+int
+ntfsclone_init(const sysdep_dispatch_t *sysdep, void **rpp,
+               sysdep_open_mode_t omode) {
+    int           error;
+    nc_context_t *ntcp;
+
+    error = (*sysdep->sys_malloc)(&ntcp, sizeof(*ntcp));
+    if (error)
+        return error;
+
+    memset(ntcp, 0, sizeof(*ntcp));
+    ntcp->nc_flags |= NC_VALID;
+    ntcp->nc_sysdep = sysdep;
+    ntcp->nc_omode  = omode;
+
+    *rpp = ntcp;
+
+    return 0;
+}
+
 /*
  * Open an image handle using the system-specific interfaces.
  */
@@ -642,41 +662,38 @@ int
 ntfsclone_open(const char *path, const char *cfpath, sysdep_open_mode_t omode,
                const sysdep_dispatch_t *sysdep, void **rpp) {
     int error = EINVAL;
+
+    nc_context_t *ntcp = NULL;
+
     if (sysdep) {
-        nc_context_t *ntcp;
-        error = (*sysdep->sys_malloc)(&ntcp, sizeof(*ntcp));
 
-        if (ntcp) {
-            memset(ntcp, 0, sizeof(*ntcp));
-            ntcp->nc_flags |= NC_VALID;
-            ntcp->nc_sysdep = sysdep;
+        error = ntfsclone_init(sysdep, (void **)&ntcp, omode);
+        if (error)
+            return error;
 
-            if ((error = (*ntcp->nc_sysdep->sys_open)(&ntcp->nc_fd, path,
-                                                      SYSDEP_OPEN_RO)) == 0) {
-                ntcp->nc_flags |= NC_OPEN;
-                if ((error = (*ntcp->nc_sysdep->sys_malloc)(
-                         &ntcp->nc_path, strlen(path) + 1)) == 0) {
-                    ntcp->nc_flags |= NC_HAVE_PATH;
-                    ntcp->nc_omode = omode;
-                    memcpy(ntcp->nc_path, path, strlen(path) + 1);
-                    if (cfpath &&
-                        ((error = (*ntcp->nc_sysdep->sys_malloc)(
-                              &ntcp->nc_cf_path, strlen(cfpath) + 1)) == 0)) {
-                        ntcp->nc_flags |= NC_HAVE_CF_PATH;
-                        memcpy(ntcp->nc_cf_path, cfpath, strlen(cfpath) + 1);
-                    }
-                    if (!error)
-                        *rpp = (void *)ntcp;
+        error =
+            (*ntcp->nc_sysdep->sys_open)(&ntcp->nc_fd, path, SYSDEP_OPEN_RO);
+        if (error == 0) {
+            ntcp->nc_flags |= NC_OPEN;
+            if ((error = (*ntcp->nc_sysdep->sys_malloc)(
+                     &ntcp->nc_path, strlen(path) + 1)) == 0) {
+                ntcp->nc_flags |= NC_HAVE_PATH;
+                memcpy(ntcp->nc_path, path, strlen(path) + 1);
+                if (cfpath &&
+                    ((error = (*ntcp->nc_sysdep->sys_malloc)(
+                          &ntcp->nc_cf_path, strlen(cfpath) + 1)) == 0)) {
+                    ntcp->nc_flags |= NC_HAVE_CF_PATH;
+                    memcpy(ntcp->nc_cf_path, cfpath, strlen(cfpath) + 1);
                 }
             }
-            if (error) {
-                ntfsclone_close(ntcp);
-            }
+        }
+        if (error) {
+            ntfsclone_close(ntcp);
+            ntcp = NULL;
         }
     }
-    if (error) {
-        *rpp = (void *)NULL;
-    }
+
+    *rpp = (void *)ntcp;
 
     return error;
 }

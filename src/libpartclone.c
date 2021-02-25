@@ -690,6 +690,25 @@ partclone_close(void *rp) {
     return error;
 }
 
+int
+partclone_init(const sysdep_dispatch_t *sysdep, void **rpp, int omode) {
+    int           error;
+    pc_context_t *pcp;
+
+    error = (*sysdep->sys_malloc)(&pcp, sizeof(*pcp));
+    if (error)
+        return error;
+
+    memset(pcp, 0, sizeof(*pcp));
+    pcp->pc_flags |= PC_VALID;
+    pcp->pc_sysdep = sysdep;
+    pcp->pc_omode  = omode;
+
+    *rpp = pcp;
+
+    return 0;
+}
+
 /*
  * Open an image handle using the system-specific interfaces.
  */
@@ -697,41 +716,37 @@ int
 partclone_open(const char *path, const char *cfpath, sysdep_open_mode_t omode,
                const sysdep_dispatch_t *sysdep, void **rpp) {
     int error = EINVAL;
+
+    pc_context_t *pcp = NULL;
+
     if (sysdep) {
-        pc_context_t *pcp;
-        error = (*sysdep->sys_malloc)(&pcp, sizeof(*pcp));
 
-        if (pcp) {
-            memset(pcp, 0, sizeof(*pcp));
-            pcp->pc_flags |= PC_VALID;
-            pcp->pc_sysdep = sysdep;
+        error = partclone_init(sysdep, (void **)&pcp, omode);
+        if (error)
+            return error;
 
-            if ((error = (*pcp->pc_sysdep->sys_open)(&pcp->pc_fd, path,
-                                                     SYSDEP_OPEN_RO)) == 0) {
-                pcp->pc_flags |= PC_OPEN;
-                if ((error = (*pcp->pc_sysdep->sys_malloc)(
-                         &pcp->pc_path, strlen(path) + 1)) == 0) {
-                    pcp->pc_flags |= PC_HAVE_PATH;
-                    pcp->pc_omode = omode;
-                    memcpy(pcp->pc_path, path, strlen(path) + 1);
-                    if (cfpath &&
-                        ((error = (*pcp->pc_sysdep->sys_malloc)(
-                              &pcp->pc_cf_path, strlen(cfpath) + 1)) == 0)) {
-                        pcp->pc_flags |= PC_HAVE_CF_PATH;
-                        memcpy(pcp->pc_cf_path, cfpath, strlen(cfpath) + 1);
-                    }
-                    if (!error)
-                        *rpp = (void *)pcp;
+        error = (*pcp->pc_sysdep->sys_open)(&pcp->pc_fd, path, SYSDEP_OPEN_RO);
+        if (error == 0) {
+            pcp->pc_flags |= PC_OPEN;
+            if ((error = (*pcp->pc_sysdep->sys_malloc)(
+                     &pcp->pc_path, strlen(path) + 1)) == 0) {
+                pcp->pc_flags |= PC_HAVE_PATH;
+                memcpy(pcp->pc_path, path, strlen(path) + 1);
+                if (cfpath &&
+                    ((error = (*pcp->pc_sysdep->sys_malloc)(
+                          &pcp->pc_cf_path, strlen(cfpath) + 1)) == 0)) {
+                    pcp->pc_flags |= PC_HAVE_CF_PATH;
+                    memcpy(pcp->pc_cf_path, cfpath, strlen(cfpath) + 1);
                 }
             }
-            if (error) {
-                partclone_close(pcp);
-            }
+        }
+        if (error) {
+            partclone_close(pcp);
+            pcp = NULL;
         }
     }
-    if (error) {
-        *rpp = (void *)NULL;
-    }
+
+    *rpp = (void *)pcp;
 
     return error;
 }

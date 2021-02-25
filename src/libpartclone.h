@@ -20,6 +20,7 @@
 
 #define MAGIC_LEN 8
 
+int      partclone_init(const sysdep_dispatch_t *sysdep, void **rpp, int omode);
 int      partclone_open(const char *path, const char *cfpath,
                         sysdep_open_mode_t omode, const sysdep_dispatch_t *sysdep,
                         void **rpp);

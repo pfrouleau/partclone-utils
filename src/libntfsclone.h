@@ -17,6 +17,8 @@
 #include "sysdep_int.h"
 #include <sys/types.h>
 
+int      ntfsclone_init(const sysdep_dispatch_t *sysdep, void **rpp,
+                        sysdep_open_mode_t omode);
 int      ntfsclone_open(const char *path, const char *cfpath,
                         sysdep_open_mode_t omode, const sysdep_dispatch_t *sysdep,
                         void **rpp);
