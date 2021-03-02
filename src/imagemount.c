@@ -81,6 +81,16 @@ typedef struct nbd_context {
     pid_t    svc_toreap;
 } nbd_context_t;
 
+void
+nc_init(nbd_context_t *nc, char prog_name[]) {
+    memset(nc, 0, sizeof(*nc));
+    nc->svc_progname    = prog_name;
+    nc->svc_daemon_mode = 1;
+    nc->svc_fh          = -1;
+    nc->nbd_fh          = -1;
+    nc->nbd_timeout     = -1;
+}
+
 /*
  * Initialize the interface to syslog (if required).
  */
@@ -843,11 +853,7 @@ main(int argc, char *argv[]) {
     int           error = 0;
     nbd_context_t nc;
 
-    memset(&nc, 0, sizeof(nc));
-    nc.nbd_fh          = -1;
-    nc.nbd_timeout     = -1;
-    nc.svc_fh          = -1;
-    nc.svc_daemon_mode = 1;
+    nc_init(&nc, argv[0]);
 
     error = parse_options(argc, argv, &file, &cfile, &nc);
 
@@ -871,7 +877,6 @@ main(int argc, char *argv[]) {
              * Verify the image.
              */
             if (!(error = image_verify(pctx))) {
-                nc.svc_progname = argv[0];
                 /*
                  * Initialize the logger and check capabilities.
                  */
