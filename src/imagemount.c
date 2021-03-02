@@ -774,13 +774,70 @@ nbd_daemon_mode(nbd_context_t *ncp, void *pctx) {
     return error;
 }
 
-/*
- * The main routine.
- */
+int
+parse_options(const int argc, char *const argv[], char **file, char **cfile,
+              nbd_context_t *nc) {
+    extern char *optarg;
+
+    int error = 0;
+    int option;
+
+    while ((option = getopt(argc, argv, "c:d:f:v:i:m:t:DrwTR")) != -1) {
+        switch (option) {
+        case 'c':
+            *cfile = optarg;
+            break;
+        case 'd':
+            nc->nbd_dev = optarg;
+            break;
+        case 'f':
+            *file = optarg;
+            break;
+        case 'v':
+            sscanf(optarg, "%d", &nc->svc_verbose);
+            break;
+        case 'i':
+            sscanf(optarg, "%d", &nc->nbd_timeout);
+            break;
+        case 'm':
+            nc->svc_mount = optarg;
+            break;
+        case 't':
+            nc->svc_mtype = optarg;
+            break;
+        case 'D':
+            nc->svc_daemon_mode = !nc->svc_daemon_mode;
+            break;
+        case 'r':
+            nc->svc_rdonly = 1;
+            break;
+        case 'w':
+            nc->svc_rdonly = 0;
+            break;
+        case 'T':
+            nc->svc_tolerant = !nc->svc_tolerant;
+            break;
+        case 'R':
+            nc->svc_raw_available = !nc->svc_raw_available;
+            break;
+        default:
+            error = 1;
+            break;
+        }
+    }
+
+    if (error || !nc->nbd_dev || !*file) {
+        fprintf(stderr,
+                "%s: usage %s -d disk -f file [-c cfile] "
+                "[-m mount [-t type]] [-i timeout] [-v verbose] [-Drw]\n",
+                argv[0], argv[0]);
+    }
+
+    return error;
+}
+
 int
 main(int argc, char *argv[]) {
-    int           option;
-    extern char * optarg;
     char *        file  = (char *)NULL;
     char *        cfile = (char *)NULL;
     int           error = 0;
@@ -792,57 +849,9 @@ main(int argc, char *argv[]) {
     nc.svc_fh          = -1;
     nc.svc_daemon_mode = 1;
 
-    /*
-     * Parse options.
-     */
-    while ((option = getopt(argc, argv, "c:d:f:v:i:m:t:DrwTR")) != -1) {
-        switch (option) {
-        case 'c':
-            cfile = optarg;
-            break;
-        case 'd':
-            nc.nbd_dev = optarg;
-            break;
-        case 'f':
-            file = optarg;
-            break;
-        case 'v':
-            sscanf(optarg, "%d", &nc.svc_verbose);
-            break;
-        case 'i':
-            sscanf(optarg, "%d", &nc.nbd_timeout);
-            break;
-        case 'm':
-            nc.svc_mount = optarg;
-            break;
-        case 't':
-            nc.svc_mtype = optarg;
-            break;
-        case 'D':
-            nc.svc_daemon_mode = !nc.svc_daemon_mode;
-            break;
-        case 'r':
-            nc.svc_rdonly = 1;
-            break;
-        case 'w':
-            nc.svc_rdonly = 0;
-            break;
-        case 'T':
-            nc.svc_tolerant = !nc.svc_tolerant;
-            break;
-        case 'R':
-            nc.svc_raw_available = !nc.svc_raw_available;
-            break;
-        default:
-            error = 1;
-            break;
-        }
-    }
+    error = parse_options(argc, argv, &file, &cfile, &nc);
 
-    /*
-     * If successful, then do it!.
-     */
-    if (!error && nc.nbd_dev && file) {
+    if (!error) {
         void *pctx = (void *)NULL;
         /*
          * Open the image.
@@ -918,11 +927,6 @@ main(int argc, char *argv[]) {
         } else {
             fprintf(stderr, "%s: cannot open: %s\n", file, strerror(error));
         }
-    } else {
-        fprintf(stderr,
-                "%s: usage %s -d disk -f file [-c cfile] "
-                "[-m mount [-t type]] [-i timeout] [-v verbose] [-Drw]\n",
-                argv[0], argv[0]);
     }
 
     return error;
