@@ -695,9 +695,7 @@ partclone_verify(void *rp) {
              * Scan through the version table and find a match for the
              * version string.
              */
-            for (veridx = 0;
-                 veridx < sizeof(version_table) / sizeof(version_table[0]);
-                 veridx++) {
+            for (veridx = 0; veridx < ARRAY_LENGTH(version_table); veridx++) {
                 if (memcmp(pcp->pc_head_v1.version,
                            version_table[veridx].version,
                            sizeof(pcp->pc_head_v1.version)) == 0) {

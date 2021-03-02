@@ -42,16 +42,13 @@ image_open(const char *path, const char *cfpath, sysdep_open_mode_t omode,
     int               error  = ENOENT;
     image_dispatch_t *fentry = (image_dispatch_t *)NULL;
 
-    for (itidx = 0; itidx < (sizeof(known_types) / sizeof(known_types[0]));
-         itidx++) {
+    for (itidx = 0; itidx < ARRAY_LENGTH(known_types); itidx++) {
         if (!(error = (*known_types[itidx]->probe)(path, sysdep))) {
             fentry = (image_dispatch_t *)known_types[itidx];
             break;
         }
     }
-    if (fentry &&
-        ((itidx < (sizeof(known_types) / sizeof(known_types[0])) - 1) ||
-         raw_allowed)) {
+    if (fentry && ((itidx < ARRAY_LENGTH(known_types) - 1) || raw_allowed)) {
         if (!(error = (*sysdep->sys_malloc)(rpp, sizeof(image_handle_t)))) {
             image_handle_t *ihp = (image_handle_t *)*rpp;
             ihp->i_magic        = IMAGE_MAGIC;

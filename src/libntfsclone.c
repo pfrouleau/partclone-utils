@@ -718,9 +718,7 @@ ntfsclone_verify_common(void *rp, int full) {
              * Scan through the version table and find a match for the
              * version string.
              */
-            for (veridx = 0;
-                 veridx < sizeof(version_table) / sizeof(version_table[0]);
-                 veridx++) {
+            for (veridx = 0; veridx < ARRAY_LENGTH(version_table); veridx++) {
                 vdt_dispatch_key_t key = VDT_VERSION_KEY(
                     ntcp->nc_head.major_ver, ntcp->nc_head.minor_ver);
                 if (memcmp(key, version_table[veridx].version, sizeof(key)) ==

@@ -720,9 +720,7 @@ nbd_check_capabilities(nbd_context_t *ncp, void *pctx) {
         cap_flag_value_t fisset;
         int              i;
 
-        for (i = 0; i < (sizeof(required_capabilities) /
-                         sizeof(required_capabilities[0]));
-             i++) {
+        for (i = 0; i < ARRAY_LENGTH(required_capabilities); i++) {
             if (!(error = cap_get_flag(effset, required_capabilities[i],
                                        CAP_EFFECTIVE, &fisset))) {
                 if (fisset != CAP_SET) {
