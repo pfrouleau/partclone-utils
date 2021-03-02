@@ -95,6 +95,16 @@ loginit(nbd_context_t *ncp) {
 }
 
 /*
+ * Release the interface to syslog (if required).
+ */
+static void
+logclose(nbd_context_t *ncp) {
+    if (ncp->svc_daemon_mode) {
+        closelog();
+    }
+}
+
+/*
  * Generate a log message if the level threshold is met.  If running in
  * daemon mode, use syslog, otherwise log to stderr.
  */
@@ -899,6 +909,7 @@ main(int argc, char *argv[]) {
                     fprintf(stderr, "%s: not capable: %s\n", argv[0],
                             strerror(error));
                 }
+                logclose(&nc);
             } else {
                 fprintf(stderr, "%s: cannot verify: %s\n", file,
                         strerror(error));
