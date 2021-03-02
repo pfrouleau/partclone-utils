@@ -859,40 +859,48 @@ main(int argc, char *argv[]) {
 
     if (!error) {
         void *pctx = (void *)NULL;
-        /*
-         * Open the image.
-         */
-        if (!(error =
-                  image_open(file, cfile,
-                             (nc.svc_rdonly) ? SYSDEP_OPEN_RO : SYSDEP_OPEN_RW,
-                             &posix_dispatch, nc.svc_raw_available, &pctx))) {
+
+        error = image_open(file, cfile,
+                           (nc.svc_rdonly) ? SYSDEP_OPEN_RO : SYSDEP_OPEN_RW,
+                           &posix_dispatch, nc.svc_raw_available, &pctx);
+        if (error) {
+            fprintf(stderr, "%s: cannot open: %s\n", file, strerror(error));
+        } else {
             logmsg(&nc, 0, "Preparing \"%s\"...\n", file);
-            /*
-             * Set tolerant mode (if specified).
-             */
+
             if (nc.svc_tolerant) {
                 image_tolerant_mode(pctx);
             }
-            /*
-             * Verify the image.
-             */
-            if (!(error = image_verify(pctx))) {
-                /*
-                 * Initialize the logger and check capabilities.
-                 */
+
+            error = image_verify(pctx);
+            if (error) {
+                fprintf(stderr, "%s: cannot verify: %s\n", file,
+                        strerror(error));
+            } else {
                 loginit(&nc);
-                if (!(error = nbd_check_capabilities(&nc, pctx))) {
-                    /*
-                     * Enter daemon mode - no more stderr messages if so.
-                     */
-                    if (!(error = nbd_daemon_mode(&nc, pctx))) {
+
+                error = nbd_check_capabilities(&nc, pctx);
+                if (error) {
+                    fprintf(stderr, "%s: not capable: %s\n", argv[0],
+                            strerror(error));
+                } else {
+                    error = nbd_daemon_mode(&nc, pctx);
+                    if (error) {
+                        fprintf(stderr, "%s: cannot connect: %s\n", nc.nbd_dev,
+                                strerror(error));
+                    } else {
                         /*
-                         * Connect to the nbd device.
+                         * Daemon mode active - no more stderr messages if so.
                          */
-                        if (!(error = nbd_connect(&nc, pctx))) {
-                            /*
-                             * Process requests.
-                             */
+                        error = nbd_connect(&nc, pctx);
+                        if (error) {
+                            logmsg(&nc, -1, "%s: cannot connect: %s\n",
+                                   nc.nbd_dev, strerror(error));
+                            logmsg(&nc, 0,
+                                   "To disconnect a previous NBD device from "
+                                   "the NBD server run: `nbd-client -d %s`\n",
+                                   nc.nbd_dev);
+                        } else {
                             error = nbd_service_requests(&nc, pctx);
                             if (error) {
                                 if (error != EINTR) {
@@ -903,34 +911,16 @@ main(int argc, char *argv[]) {
                                            argv[0]);
                                 }
                             }
-                            /*
-                             * Disconnect from the nbd device.
-                             */
+
                             nbd_disconnect(&nc, pctx);
-                        } else {
-                            logmsg(&nc, -1, "%s: cannot connect: %s\n",
-                                   nc.nbd_dev, strerror(error));
-                            logmsg(&nc, 0,
-                                   "To disconnect a previous NBD device from "
-                                   "the NBD server run: `nbd-client -d %s`\n",
-                                   nc.nbd_dev);
                         }
-                    } else {
-                        fprintf(stderr, "%s: cannot connect: %s\n", nc.nbd_dev,
-                                strerror(error));
                     }
-                } else {
-                    fprintf(stderr, "%s: not capable: %s\n", argv[0],
-                            strerror(error));
                 }
+
                 logclose(&nc);
-            } else {
-                fprintf(stderr, "%s: cannot verify: %s\n", file,
-                        strerror(error));
             }
+
             image_close(pctx);
-        } else {
-            fprintf(stderr, "%s: cannot open: %s\n", file, strerror(error));
         }
     }
 
