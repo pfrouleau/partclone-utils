@@ -84,6 +84,7 @@ main(int argc, char *argv[]) {
                 v1_context_t * v = (v1_context_t *)p->pc_verdep;
                 uint64_t       bmi;
                 unsigned char *iob;
+                int64_t const  block_size = partclone_blocksize(pctx);
 
                 if (dontcare && error)
                     p->pc_flags |= 4;
@@ -113,8 +114,7 @@ main(int argc, char *argv[]) {
                         " unset, %" PRIu64 " set, %" PRIu64 " strange\n",
                         argv[i], p->pc_head.totalblock, bmscanned, unset, set,
                         strange);
-                if ((iob =
-                         (unsigned char *)malloc(partclone_blocksize(pctx)))) {
+                if ((iob = (uint8_t *)malloc(block_size))) {
                     int *       fd       = (int *)p->pc_fd;
                     int const   crc_size = p->pc_head.checksum_size;
                     off_t       sblkpos;
@@ -124,14 +124,12 @@ main(int argc, char *argv[]) {
                     error   = partclone_seek(pctx, 0);
                     error   = partclone_readblocks(pctx, iob, 1);
                     sblkpos = lseek(*fd, 0, SEEK_CUR);
-                    sblkpos -= partclone_blocksize(pctx);
+                    sblkpos -= block_size;
                     fstat(*fd, &sbuf);
                     fprintf(stdout,
-                            "%s: size is %lld bytes, blocks (%lld bytes) start "
-                            "at %lld",
-                            argv[i], (long long)sbuf.st_size,
-                            (long long)partclone_blocksize(pctx),
-                            (long long)sblkpos);
+                            "%s: size is %ld bytes, blocks (%ld bytes) start "
+                            "at %ld",
+                            argv[i], sbuf.st_size, block_size, sblkpos);
                     data_size = sbuf.st_size - sblkpos;
                     fprintf(
                         stdout, ", %ld blocks written",
@@ -147,6 +145,7 @@ main(int argc, char *argv[]) {
                     } else {
                         fprintf(stdout, "\n");
                     }
+
                     if ((error = partclone_seek(pctx, lastset)) == 0) {
                         if ((error = partclone_readblocks(pctx, iob, 1)) == 0) {
                             off_t cpos, eofpos;
@@ -155,9 +154,22 @@ main(int argc, char *argv[]) {
                             eofpos = lseek(*fd, 0, SEEK_END);
                             if (cpos == (eofpos - crc_size)) {
                                 fprintf(stdout,
-                                        "%s: read last block at end of file - "
-                                        "success\n",
+                                        "%s: read last block at end of file\n",
                                         argv[i]);
+
+                                if (p->pc_ntfs_boot) {
+                                    int64_t const bkp_sector_off =
+                                        block_size - SECTOR_SIZE;
+                                    if (memcmp(p->pc_ntfs_boot,
+                                               iob + bkp_sector_off,
+                                               SECTOR_SIZE)) {
+                                        fprintf(stderr,
+                                                "%s: NTFS's backup boot sector "
+                                                "is missing\n",
+                                                argv[i]);
+                                        anomalies++;
+                                    }
+                                }
                             } else {
                                 fprintf(stderr,
                                         "%s: position after last block = %ld, "
@@ -182,7 +194,7 @@ main(int argc, char *argv[]) {
                     free(iob);
                 } else {
                     fprintf(stderr, "%s: cannot malloc %" PRId64 " bytes\n",
-                            argv[i], partclone_blocksize(pctx));
+                            argv[i], block_size);
                     anomalies++;
                 }
             } else {
