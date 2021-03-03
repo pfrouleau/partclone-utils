@@ -26,21 +26,22 @@ static const char cf_trailer[] = ".cf";
 struct version_dispatch_table;
 struct change_file_context;
 
-#define PC_OPEN         0x0001  /* Image is open. */
-#define PC_CF_OPEN      0x0002  /* Change file is open */
-#define PC_VERIFIED     0x0004  /* Image verified */
-#define PC_HAVE_CFDEP   0x0040  /* Image has change file handle */
-#define PC_HAVE_VERDEP  0x0080  /* Image has version-dependent handle */
-#define PC_HAVE_IVBLOCK 0x0100  /* Image has invalid block. */
-#define PC_CF_VERIFIED  0x0200  /* Change file verified. */
-#define PC_CF_INIT      0x0400  /* Change file init done. */
-#define PC_VERSION_INIT 0x0800  /* Version-dependent init done. */
-#define PC_HEAD_VALID   0x1000  /* Image header valid. */
-#define PC_HAVE_PATH    0x2000  /* Path string allocated */
-#define PC_HAVE_CF_PATH 0x4000  /* Path string allocated */
-#define PC_VALID        0x8000  /* Header is valid */
-#define PC_TOLERANT     0x40000 /* Open in tolerant mode */
-#define PC_READ_ONLY    0x80000 /* Open read only */
+#define PC_OPEN           0x0001  /* Image is open. */
+#define PC_CF_OPEN        0x0002  /* Change file is open */
+#define PC_VERIFIED       0x0004  /* Image verified */
+#define PC_HAVE_CFDEP     0x0040  /* Image has change file handle */
+#define PC_HAVE_VERDEP    0x0080  /* Image has version-dependent handle */
+#define PC_HAVE_IVBLOCK   0x0100  /* Image has invalid block. */
+#define PC_CF_VERIFIED    0x0200  /* Change file verified. */
+#define PC_CF_INIT        0x0400  /* Change file init done. */
+#define PC_VERSION_INIT   0x0800  /* Version-dependent init done. */
+#define PC_HEAD_VALID     0x1000  /* Image header valid. */
+#define PC_HAVE_PATH      0x2000  /* Path string allocated */
+#define PC_HAVE_CF_PATH   0x4000  /* Path string allocated */
+#define PC_VALID          0x8000  /* Header is valid */
+#define PC_HAVE_NTFS_BOOT 0x20000 /* NTFS boot sector allocated */
+#define PC_TOLERANT       0x40000 /* Open in tolerant mode */
+#define PC_READ_ONLY      0x80000 /* Open read only */
 
 /*
  * Macros to check state flags.
@@ -71,6 +72,7 @@ struct change_file_context;
     (PCTX_FLAGS_SET(_p, PC_HAVE_CFDEP) && (_p)->pc_cfdep)
 #define PCTX_HAVE_IVBLOCK(_p) \
     (PCTX_FLAGS_SET(_p, PC_HAVE_IVBLOCK) && (_p)->pc_ivblock)
+#define PCTX_HAVE_BOOT_SECTOR(p) PCTX_FLAGS_SET(p, PC_HAVE_NTFS_BOOT)
 
 /*
  * Version dispatch table - to handle different file format versions.
@@ -210,6 +212,73 @@ precalculate_sumcount(pc_context_t *pcp) {
 }
 
 /*
+ * Return 0 when successful; otherwise error code.
+ */
+int
+copy_ntfs_boot_sector(pc_context_t *pcp) {
+    int error;
+
+    error = (*pcp->pc_sysdep->sys_malloc)(&pcp->pc_ntfs_boot, SECTOR_SIZE);
+    if (error)
+        return error;
+
+    uint64_t orig_off;
+    uint64_t r_size;
+
+    error = (*pcp->pc_sysdep->sys_seek)(pcp->pc_fd, 0, SYSDEP_SEEK_RELATIVE,
+                                        &orig_off);
+    if (error)
+        return error;
+
+    error = (*pcp->pc_sysdep->sys_read)(pcp->pc_fd, pcp->pc_ntfs_boot,
+                                        SECTOR_SIZE, &r_size);
+    if (error)
+        return error;
+
+    if (r_size != SECTOR_SIZE)
+        return EIO;
+
+    /* Restore the file cursor to the begining of the block */
+    error = (*pcp->pc_sysdep->sys_seek)(pcp->pc_fd, orig_off,
+                                        SYSDEP_SEEK_ABSOLUTE, NULL);
+    if (error)
+        return error;
+
+    // ".R.NTFS    "
+    const uint8_t ntfs_boot_sig[] = {0xEB, 0x52, 0x90, 0x4E, 0x54, 0x46,
+                                     0x53, 0x20, 0x20, 0x20, 0x20, 0x00};
+
+    if (memcmp(ntfs_boot_sig, pcp->pc_ntfs_boot, sizeof(ntfs_boot_sig)))
+        return EINVAL;    // Not a valid NTFS boot sector
+
+    return 0;
+}
+
+static int
+is_expected_ntfs_image_sig(char const *fs_sig) {
+
+    char fs_magic[FS_MAGIC_SIZE] = ntfs_MAGIC;
+
+    return memcmp(fs_sig, fs_magic, FS_MAGIC_SIZE) == 0;
+}
+
+/*
+ * Return 1 if the image contain an NTFS file system; 0 otherwise.
+ */
+static int
+v1_is_ntfs_image(pc_context_t *pcp) {
+    return is_expected_ntfs_image_sig(pcp->pc_head_v1.fs);
+}
+
+/*
+ * Return 1 if the image contain an NTFS file system; 0 otherwise.
+ */
+static int
+v2_is_ntfs_image(pc_context_t *pcp) {
+    return is_expected_ntfs_image_sig(pcp->pc_head_v2.fs);
+}
+
+/*
  * Verify the currently open file.
  *
  * - Load the bitmap
@@ -258,7 +327,11 @@ v1_verify(pc_context_t *pcp) {
                               &r_size)) == 0) &&
                         (r_size == sizeof(magicstr)) &&
                         (memcmp(magicstr, cmagicstr, sizeof(magicstr)) == 0)) {
-                        error = precalculate_sumcount(pcp);
+                        if (v1_is_ntfs_image(pcp)) {
+                            error = copy_ntfs_boot_sector(pcp);
+                        }
+                        if (error == 0)
+                            error = precalculate_sumcount(pcp);
                     } else {
                         if (error == 0)
                             error = EINVAL;
@@ -540,16 +613,23 @@ v2_verify(pc_context_t *pcp) {
                         if (crc32 != *((crc32_t *)(bitmap + bitmap_size))) {
                             error = EINVAL;
                         } else {
-                            /*
-                             * Convert the "bit" map into a "byte" map
-                             */
-                            for (i = 0; i < pcp->pc_head.totalblock; i++)
-                                v1p->v1_bitmap[i] =
-                                    (bitmap[i >> 3] & (1 << (i & 7))) ? 1 : 0;
 
-                            (void)(*pcp->pc_sysdep->sys_free)(bitmap);
+                            if (v2_is_ntfs_image(pcp)) {
+                                error = copy_ntfs_boot_sector(pcp);
+                            }
 
-                            error = precalculate_sumcount(pcp);
+                            if (error == 0) {
+                                /*
+                                 * Convert the "bit" map into a "byte" map
+                                 */
+                                for (i = 0; i < pcp->pc_head.totalblock; i++)
+                                    v1p->v1_bitmap[i] =
+                                        (bitmap[i >> 3] & (1 << (i & 7))) != 0;
+
+                                (void)(*pcp->pc_sysdep->sys_free)(bitmap);
+
+                                error = precalculate_sumcount(pcp);
+                            }
                         }
                     } else if (error == 0) {
                         error = EINVAL;
@@ -599,6 +679,9 @@ partclone_close(void *rp) {
         if (PCTX_HAVE_VERDEP(pcp)) {
             if (pcp->pc_dispatch && pcp->pc_dispatch->version_finish)
                 error = (*pcp->pc_dispatch->version_finish)(pcp);
+        }
+        if (PCTX_HAVE_BOOT_SECTOR(pcp)) {
+            (void)(*pcp->pc_sysdep->sys_free)(pcp->pc_ntfs_boot);
         }
         (void)(*pcp->pc_sysdep->sys_free)(pcp);
         error = 0;
