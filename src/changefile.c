@@ -9,6 +9,7 @@
 #endif /* HAVE_CONFIG_H */
 #include "changefile.h"
 #include "changefileint.h"
+#include "libchecksum.h"
 #include <errno.h>
 #include <string.h>
 
@@ -24,30 +25,14 @@ cf_init(const char *cfpath, const sysdep_dispatch_t *sysdep, uint64_t blocksize,
     cf_context_t *cfp   = (cf_context_t *)NULL;
 
     if ((error = (*sysdep->sys_malloc)(&cfp, sizeof(*cfp))) == 0) {
-        int i;
         memset(cfp, 0, sizeof(*cfp));
+        init_crc32();
 
-        /*
-         * Open the file.
-         */
         if ((error = (*sysdep->sys_open)(&cfp->cfc_fd, cfpath,
                                          SYSDEP_OPEN_RW)) == 0) {
             cfp->cfc_sysdep     = sysdep;
             cfp->cfc_blocksize  = blocksize;
             cfp->cfc_blockcount = blockcount;
-            /*
-             * Initialize the CRC table.
-             */
-            for (i = 0; i < CRC_TABLE_LEN; i++) {
-                int      j;
-                uint32_t init_crc = (uint32_t)i;
-                for (j = 0; j < CRC_UNIT_BITS; j++) {
-                    init_crc = (init_crc & 0x00000001L)
-                                   ? (init_crc >> 1) ^ 0xEDB88320L
-                                   : (init_crc >> 1);
-                }
-                cfp->cfc_crc_tab32[i] = init_crc;
-            }
         } else {
             (void)(*sysdep->sys_free)(cfp);
             cfp = (cf_context_t *)NULL;
@@ -252,22 +237,6 @@ cf_seek(void *vcp, uint64_t blockno) {
 }
 
 /*
- * CRC routine.
- */
-static inline uint32_t
-cf_crc32(cf_context_t *cfp, uint32_t crc, unsigned char *buf, uint64_t size) {
-    uint64_t s;
-    uint32_t tmp;
-
-    for (s = 0; s < size; s++) {
-        tmp = crc ^ (((uint32_t)buf[s]) & 0x000000ffL);
-        crc = (crc >> 8) ^ cfp->cfc_crc_tab32[tmp & 0xff];
-    }
-
-    return crc;
-}
-
-/*
  * Read the block at the current position.
  */
 int
@@ -301,7 +270,7 @@ cf_readblock(void *vcp, void *buffer) {
                     if ((btrail.cfb_curblock == cfp->cfc_curpos) &&
                         (btrail.cfb_magic == CF_MAGIC_3) &&
                         (btrail.cfb_crc ==
-                         cf_crc32(cfp, 0L, buffer, cfp->cfc_blocksize))) {
+                         update_crc32(0L, buffer, cfp->cfc_blocksize))) {
                         error = 0;
                     } else {
                         error = ESRCH;
@@ -347,7 +316,7 @@ cf_writeblock(void *vcp, void *buffer) {
              (nbloffs) ? SYSDEP_SEEK_ABSOLUTE : SYSDEP_SEEK_END, &curpos)) ==
         0) {
         cf_block_trailer_t btrail = {
-            cfp->cfc_curpos, cf_crc32(cfp, 0, buffer, cfp->cfc_blocksize),
+            cfp->cfc_curpos, update_crc32(0, buffer, cfp->cfc_blocksize),
             CF_MAGIC_3};
         uint64_t nwritten;
         if (((error = (*cfp->cfc_sysdep->sys_write)(

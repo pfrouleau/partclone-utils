@@ -44,7 +44,6 @@ typedef struct change_file_context {
     uint64_t                 cfc_blocksize;
     uint64_t                 cfc_blockcount;
     uint64_t                 cfc_curpos;
-    uint32_t                 cfc_crc_tab32[CRC_TABLE_LEN];
 } cf_context_t;
 
 typedef struct change_file_block_trailer {
