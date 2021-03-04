@@ -302,11 +302,26 @@ static volatile int *  diedp      = (int *)NULL;
 static volatile pid_t *toreapp    = (pid_t *)NULL;
 
 static struct {
-    volatile int   timetoleave; /* <3: no; >=3: yes */
-    volatile int   someonedied; /*  0: no;  >0: yes */
-    volatile pid_t whodied;
-    volatile pid_t child_id;
+    volatile int     timetoleave; /* <3: no; >=3: yes */
+    volatile int     someonedied; /*  0: no;  >0: yes */
+    volatile pid_t   child_id;
+    volatile pid_t   whodied;
+    struct sigaction newsig;
+    struct sigaction oldsig;
 } req_context;
+
+static void
+init_signal(struct sigaction *newsig, struct sigaction *oldsig) {
+    memset(newsig, 0, sizeof(*newsig));
+    memset(oldsig, 0, sizeof(*oldsig));
+
+    newsig->sa_sigaction = nbd_finish;
+
+    sigaction(SIGINT, newsig, oldsig);
+    sigaction(SIGHUP, newsig, oldsig);
+    sigaction(SIGTERM, newsig, oldsig);
+    sigaction(SIGQUIT, newsig, oldsig);
+}
 
 static void
 init_request_context() {
@@ -316,6 +331,16 @@ init_request_context() {
     finishflag = &req_context.timetoleave;
     diedp      = &req_context.someonedied;
     toreapp    = &req_context.whodied;
+
+    init_signal(&req_context.newsig, &req_context.oldsig);
+}
+
+static void
+set_signal(sa_sigaction sig_handler, int flags) {
+    req_context.newsig.sa_sigaction = sig_handler;
+    req_context.newsig.sa_flags     = flags;
+
+    sigaction(SIGCHLD, &req_context.newsig, &req_context.oldsig);
 }
 
 /*
@@ -342,19 +367,6 @@ nbd_reapchild(int sig, siginfo_t *si, void *vp) {
     }
 }
 
-static void
-init_signal(struct sigaction *newsig, struct sigaction *oldsig) {
-    memset(newsig, 0, sizeof(*newsig));
-    memset(oldsig, 0, sizeof(*oldsig));
-
-    newsig->sa_sigaction = nbd_finish;
-
-    sigaction(SIGINT, newsig, oldsig);
-    sigaction(SIGHUP, newsig, oldsig);
-    sigaction(SIGTERM, newsig, oldsig);
-    sigaction(SIGQUIT, newsig, oldsig);
-}
-
 /*
  * Handle NBD resquest
  *
@@ -363,13 +375,11 @@ init_signal(struct sigaction *newsig, struct sigaction *oldsig) {
  */
 static int
 nbd_service_requests(nbd_context_t *ncp, void *pctx) {
-    char *           readbuf      = (char *)malloc(READBUF_INITIAL);
-    char *           pidfile      = (char *)NULL;
-    size_t           readbuf_size = READBUF_INITIAL;
-    int              error        = 0;
-    struct sigaction newsig, oldsig;
+    char * readbuf      = (char *)malloc(READBUF_INITIAL);
+    char * pidfile      = (char *)NULL;
+    size_t readbuf_size = READBUF_INITIAL;
+    int    error        = 0;
 
-    init_signal(&newsig, &oldsig);
     init_request_context();
 
     /*
@@ -387,9 +397,8 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
     if (ncp->svc_mount) {
         pid_t cpid;
 
-        newsig.sa_sigaction = nbd_reapchild;
-        newsig.sa_flags     = SA_RESETHAND | SA_SIGINFO;
-        sigaction(SIGCHLD, &newsig, &oldsig);
+        set_signal(nbd_reapchild, SA_RESETHAND | SA_SIGINFO);
+
         switch ((cpid = fork())) {
         case 0: /* we are the child */
             exit(mount(ncp->nbd_dev, ncp->svc_mount,
@@ -697,9 +706,7 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
             if (ncp->svc_mount) {
                 pid_t cpid;
 
-                newsig.sa_sigaction = nbd_reapchild;
-                newsig.sa_flags     = SA_RESETHAND | SA_SIGINFO;
-                sigaction(SIGCHLD, &newsig, &oldsig);
+                set_signal(nbd_reapchild, SA_RESETHAND | SA_SIGINFO);
                 req_context.timetoleave = 2;
                 switch ((cpid = fork())) {
                 case 0:
