@@ -78,7 +78,6 @@ typedef struct nbd_context {
     uint64_t svc_blockcount;
     uint64_t svc_offsetmask;
     uint64_t svc_blockmask;
-    pid_t    svc_toreap;
 } nbd_context_t;
 
 void
@@ -306,10 +305,14 @@ static struct {
     volatile int   timetoleave; /* <3: no; >=3: yes */
     volatile int   someonedied; /*  0: no;  >0: yes */
     volatile pid_t whodied;
+    volatile pid_t child_id;
 } req_context;
 
 static void
 init_request_context() {
+    req_context.child_id = 0;
+    req_context.whodied  = 0;
+
     finishflag = &req_context.timetoleave;
     diedp      = &req_context.someonedied;
     toreapp    = &req_context.whodied;
@@ -388,7 +391,7 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
         newsig.sa_flags     = SA_RESETHAND | SA_SIGINFO;
         sigaction(SIGCHLD, &newsig, &oldsig);
         switch ((cpid = fork())) {
-        case 0:
+        case 0: /* we are the child */
             exit(mount(ncp->nbd_dev, ncp->svc_mount,
                        (ncp->svc_mtype) ? ncp->svc_mtype : "ext2",
                        (ncp->svc_rdonly) ? MS_RDONLY : 0, ""));
@@ -401,8 +404,8 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
              * We ignore this failure.  Someone else can try the mount.
              */
             break;
-        default:
-            ncp->svc_toreap = cpid;
+        default: /* we are the parent */
+            req_context.child_id = cpid;
             break;
         }
     }
@@ -449,8 +452,8 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
             req_context.whodied     = 0;
             logmsg(ncp, 2, "%s: pid %d finished with %d\n", ncp->svc_progname,
                    corpse, existat);
-            if (ncp->svc_toreap == corpse)
-                ncp->svc_toreap = 0;
+            if (req_context.child_id == corpse)
+                req_context.child_id = 0;
         }
 
         /*
@@ -716,7 +719,7 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
                     req_context.timetoleave = 3; /* Just punt. */
                     break;
                 default:
-                    ncp->svc_toreap = cpid;
+                    req_context.child_id = cpid;
                     break;
                 }
             } else {
@@ -724,7 +727,7 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
             }
         }
     }
-    if (ncp->svc_toreap) {
+    if (req_context.child_id) {
         int   existat;
         pid_t corpse;
 
