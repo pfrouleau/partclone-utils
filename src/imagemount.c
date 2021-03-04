@@ -325,6 +325,19 @@ nbd_reapchild(int sig, siginfo_t *si, void *vp) {
     }
 }
 
+static void
+init_signal(struct sigaction *newsig, struct sigaction *oldsig) {
+    memset(newsig, 0, sizeof(*newsig));
+    memset(oldsig, 0, sizeof(*oldsig));
+
+    newsig->sa_sigaction = nbd_finish;
+
+    sigaction(SIGINT, newsig, oldsig);
+    sigaction(SIGHUP, newsig, oldsig);
+    sigaction(SIGTERM, newsig, oldsig);
+    sigaction(SIGQUIT, newsig, oldsig);
+}
+
 /*
  * Handle NBD resquest
  *
@@ -346,12 +359,7 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
      * Prepare termination signal handlers.
      */
     finishflag = (int *)&timetoleave;
-    memset(&newsig, 0, sizeof(newsig));
-    newsig.sa_sigaction = nbd_finish;
-    sigaction(SIGINT, &newsig, &oldsig);
-    sigaction(SIGHUP, &newsig, &oldsig);
-    sigaction(SIGTERM, &newsig, &oldsig);
-    sigaction(SIGQUIT, &newsig, &oldsig);
+    init_signal(&newsig, &oldsig);
 
     /*
      * Make sure we have a read buffer.
