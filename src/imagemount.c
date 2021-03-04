@@ -298,11 +298,27 @@ nbd_disconnect(nbd_context_t *ncp, void *pctx) {
  * Signal handling.
  */
 
+static volatile int *  finishflag = (int *)NULL;
+static volatile int *  diedp      = (int *)NULL;
+static volatile pid_t *toreapp    = (pid_t *)NULL;
+
+static struct {
+    volatile int   timetoleave; /* <3: no; >=3: yes */
+    volatile int   someonedied; /*  0: no;  >0: yes */
+    volatile pid_t whodied;
+} req_context;
+
+static void
+init_request_context() {
+    finishflag = &req_context.timetoleave;
+    diedp      = &req_context.someonedied;
+    toreapp    = &req_context.whodied;
+}
+
 /*
  * Handle termination signals.  Set finish flag and let service request loop
  * finish up and potentially umount the filesystem.
  */
-static int *finishflag = (int *)NULL;
 void
 nbd_finish(int sig, siginfo_t *si, void *vp) {
     if (finishflag)
@@ -313,8 +329,6 @@ nbd_finish(int sig, siginfo_t *si, void *vp) {
  * Handle child termination.  Set the toreapp value to allow the service
  * request preamble to reap the particular child.
  */
-static pid_t *toreapp = (pid_t *)NULL;
-static int *  diedp   = (int *)NULL;
 static void
 nbd_reapchild(int sig, siginfo_t *si, void *vp) {
     if (si && si->si_pid && toreapp) {
@@ -350,23 +364,17 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
     char *           pidfile      = (char *)NULL;
     size_t           readbuf_size = READBUF_INITIAL;
     int              error        = 0;
-    volatile int     timetoleave  = 0;
-    volatile int     someonedied  = 0;
-    volatile pid_t   whodied      = 0;
     struct sigaction newsig, oldsig;
 
-    /*
-     * Prepare termination signal handlers.
-     */
-    finishflag = (int *)&timetoleave;
     init_signal(&newsig, &oldsig);
+    init_request_context();
 
     /*
      * Make sure we have a read buffer.
      */
     if (!readbuf) {
-        timetoleave = 3;
-        error       = ENOMEM;
+        req_context.timetoleave = 3;
+        error                   = ENOMEM;
     }
 
     /*
@@ -378,8 +386,6 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
 
         newsig.sa_sigaction = nbd_reapchild;
         newsig.sa_flags     = SA_RESETHAND | SA_SIGINFO;
-        diedp               = (int *)&someonedied;
-        toreapp             = (pid_t *)&whodied;
         sigaction(SIGCHLD, &newsig, &oldsig);
         switch ((cpid = fork())) {
         case 0:
@@ -423,24 +429,24 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
     /*
      * Do work until we're completely done.
      */
-    while (timetoleave < 3) {
+    while (req_context.timetoleave < 3) {
         struct nbd_request request;
         size_t             rlength;
 
         /*
          * If signalled that someone died, reap the child to avoid zombies.
          */
-        if (someonedied) {
+        if (req_context.someonedied) {
             int   existat;
             pid_t corpse;
 
-            if (whodied) {
-                corpse = waitpid(whodied, &existat, WNOHANG);
+            if (req_context.whodied) {
+                corpse = waitpid(req_context.whodied, &existat, WNOHANG);
             } else {
                 corpse = wait(&existat);
             }
-            someonedied = 0;
-            whodied     = 0;
+            req_context.someonedied = 0;
+            req_context.whodied     = 0;
             logmsg(ncp, 2, "%s: pid %d finished with %d\n", ncp->svc_progname,
                    corpse, existat);
             if (ncp->svc_toreap == corpse)
@@ -498,8 +504,8 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
                                    "[%s] not retrying allocation of %d byte "
                                    "buffer\n",
                                    ncp->svc_progname, req_readbuf);
-                            timetoleave = 1;
-                            error       = ENOMEM;
+                            req_context.timetoleave = 1;
+                            error                   = ENOMEM;
                             break;
                         }
                     }
@@ -513,7 +519,7 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
                 switch (ntohl(request.type)) {
                 case NBD_CMD_DISC:
                     logmsg(ncp, 1, "NBD_SHUTDOWN\n");
-                    timetoleave = 1;
+                    req_context.timetoleave = 1;
                     break;
                 case NBD_CMD_WRITE:
                     logmsg(ncp, 1, "NBD_WRITE0x%x@0x%x\n", length, offset);
@@ -549,7 +555,8 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
                                  */
                                 while (((rlength = read(ncp->svc_fh, rembp,
                                                         remlen)) == -1) &&
-                                       (errno == EINTR) && (!timetoleave))
+                                       (errno == EINTR) &&
+                                       (!req_context.timetoleave))
                                     ;
                                 if (rlength == remlen) {
                                     if (!(error =
@@ -619,7 +626,7 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
                  */
                 while (((rlength = write(ncp->svc_fh, &reply, sizeof(reply))) ==
                         -1) &&
-                       (errno == EINTR) && (!timetoleave))
+                       (errno == EINTR) && (!req_context.timetoleave))
                     ;
                 if (rlength == sizeof(reply)) {
                     /*
@@ -633,7 +640,7 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
                          */
                         while (((rlength = write(ncp->svc_fh, replyappend,
                                                  length)) == -1) &&
-                               (errno == EINTR) && (!timetoleave))
+                               (errno == EINTR) && (!req_context.timetoleave))
                             ;
                         if (rlength == length) {
                             error = 0;
@@ -665,8 +672,8 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
                  * waiting for a response, then we're completely hosed.
                  */
 #ifdef POTENTIAL_DISASTER
-                timetoleave = 1;
-                error       = EIO;
+                req_context.timetoleave = 1;
+                error                   = EIO;
 #endif /* POTENTIAL_DISASTER */
             }
         } else {
@@ -680,7 +687,7 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
         /*
          * Check to see if we received a termination signal.
          */
-        if (timetoleave == 1) {
+        if (req_context.timetoleave == 1) {
             /*
              * Getting ready to punt.
              */
@@ -689,10 +696,8 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
 
                 newsig.sa_sigaction = nbd_reapchild;
                 newsig.sa_flags     = SA_RESETHAND | SA_SIGINFO;
-                diedp               = (int *)&timetoleave;
-                toreapp             = (pid_t *)&whodied;
                 sigaction(SIGCHLD, &newsig, &oldsig);
-                timetoleave = 2;
+                req_context.timetoleave = 2;
                 switch ((cpid = fork())) {
                 case 0:
                     /*
@@ -708,14 +713,14 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
                     error = errno;
                     logmsg(ncp, -1, "%s: cannot fork to unmount: %s\n",
                            ncp->svc_progname, strerror(error));
-                    timetoleave = 3; /* Just punt. */
+                    req_context.timetoleave = 3; /* Just punt. */
                     break;
                 default:
                     ncp->svc_toreap = cpid;
                     break;
                 }
             } else {
-                timetoleave = 3;
+                req_context.timetoleave = 3;
             }
         }
     }
@@ -723,8 +728,8 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
         int   existat;
         pid_t corpse;
 
-        if (whodied) {
-            corpse = waitpid(whodied, &existat, WNOHANG);
+        if (req_context.whodied) {
+            corpse = waitpid(req_context.whodied, &existat, WNOHANG);
         } else {
             corpse = wait(&existat);
         }
