@@ -399,6 +399,37 @@ mount_dev(nbd_context_t *ncp) {
     return error;
 }
 
+static int
+unmount_dev(nbd_context_t *ncp, int err_state) {
+    int   error = 0;
+    pid_t cpid;
+
+    set_signal(nbd_reapchild, SA_RESETHAND | SA_SIGINFO);
+    switch ((cpid = fork())) {
+    case 0:
+        /*
+         * If we had an error, try to force the unmount.
+         */
+        if (err_state) {
+            exit(umount2(ncp->svc_mount, MNT_FORCE));
+        } else {
+            exit(umount(ncp->svc_mount));
+        }
+        break;
+    case -1:
+        error = errno;
+        logmsg(ncp, -1, "%s: cannot fork to unmount: %s\n", ncp->svc_progname,
+               strerror(error));
+        req_context.timetoleave = 3; /* Just punt. */
+        break;
+    default:
+        req_context.child_id = cpid;
+        break;
+    }
+
+    return error;
+}
+
 /*
  * Handle NBD resquest
  *
@@ -715,31 +746,9 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
              * Getting ready to punt.
              */
             if (ncp->svc_mount) {
-                pid_t cpid;
-
-                set_signal(nbd_reapchild, SA_RESETHAND | SA_SIGINFO);
                 req_context.timetoleave = 2;
-                switch ((cpid = fork())) {
-                case 0:
-                    /*
-                     * If we had an error, try to force the unmount.
-                     */
-                    if (error) {
-                        exit(umount2(ncp->svc_mount, MNT_FORCE));
-                    } else {
-                        exit(umount(ncp->svc_mount));
-                    }
-                    break;
-                case -1:
-                    error = errno;
-                    logmsg(ncp, -1, "%s: cannot fork to unmount: %s\n",
-                           ncp->svc_progname, strerror(error));
-                    req_context.timetoleave = 3; /* Just punt. */
-                    break;
-                default:
-                    req_context.child_id = cpid;
-                    break;
-                }
+
+                error = unmount_dev(ncp, error);
             } else {
                 req_context.timetoleave = 3;
             }
