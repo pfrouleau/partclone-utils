@@ -370,6 +370,35 @@ set_signal(signal_callback_t sig_handler, int flags) {
     sigaction(SIGCHLD, &req_context.newsig, &req_context.oldsig);
 }
 
+static int
+mount_dev(nbd_context_t *ncp) {
+    int   error = 0;
+    pid_t cpid;
+
+    set_signal(nbd_reapchild, SA_RESETHAND | SA_SIGINFO);
+
+    switch ((cpid = fork())) {
+    case 0: /* we are the child */
+        exit(mount(ncp->nbd_dev, ncp->svc_mount,
+                   (ncp->svc_mtype) ? ncp->svc_mtype : "ext2",
+                   (ncp->svc_rdonly) ? MS_RDONLY : 0, ""));
+        break;
+    case -1:
+        error = errno;
+        logmsg(ncp, -1, "%s: cannot fork to mount: %s\n", ncp->svc_progname,
+               strerror(error));
+        /*
+         * We ignore this failure.  Someone else can try the mount.
+         */
+        break;
+    default: /* we are the parent */
+        req_context.child_id = cpid;
+        break;
+    }
+
+    return error;
+}
+
 /*
  * Handle NBD resquest
  *
@@ -397,29 +426,8 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
      * If we're setting up a mount, then for a child to do the mount and
      * prepare the signal handler to be notified when the child completes.
      */
-    if (ncp->svc_mount) {
-        pid_t cpid;
-
-        set_signal(nbd_reapchild, SA_RESETHAND | SA_SIGINFO);
-
-        switch ((cpid = fork())) {
-        case 0: /* we are the child */
-            exit(mount(ncp->nbd_dev, ncp->svc_mount,
-                       (ncp->svc_mtype) ? ncp->svc_mtype : "ext2",
-                       (ncp->svc_rdonly) ? MS_RDONLY : 0, ""));
-            break;
-        case -1:
-            error = errno;
-            logmsg(ncp, -1, "%s: cannot fork to mount: %s\n", ncp->svc_progname,
-                   strerror(error));
-            /*
-             * We ignore this failure.  Someone else can try the mount.
-             */
-            break;
-        default: /* we are the parent */
-            req_context.child_id = cpid;
-            break;
-        }
+    if (!error && ncp->svc_mount) {
+        error = mount_dev(ncp);
     }
 
     /*
