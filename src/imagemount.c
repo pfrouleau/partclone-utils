@@ -430,6 +430,24 @@ unmount_dev(nbd_context_t *ncp, int err_state) {
     return error;
 }
 
+static void
+call_caretaker(nbd_context_t *ncp) {
+    int   existat;
+    pid_t corpse;
+
+    if (req_context.whodied) {
+        corpse = waitpid(req_context.whodied, &existat, WNOHANG);
+    } else {
+        corpse = wait(&existat);
+    }
+    req_context.someonedied = 0;
+    req_context.whodied     = 0;
+    logmsg(ncp, 2, "%s: pid %d finished with %d\n", ncp->svc_progname, corpse,
+           existat);
+    if (req_context.child_id == corpse)
+        req_context.child_id = 0;
+}
+
 /*
  * Handle NBD resquest
  *
@@ -491,20 +509,7 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
          * If signalled that someone died, reap the child to avoid zombies.
          */
         if (req_context.someonedied) {
-            int   existat;
-            pid_t corpse;
-
-            if (req_context.whodied) {
-                corpse = waitpid(req_context.whodied, &existat, WNOHANG);
-            } else {
-                corpse = wait(&existat);
-            }
-            req_context.someonedied = 0;
-            req_context.whodied     = 0;
-            logmsg(ncp, 2, "%s: pid %d finished with %d\n", ncp->svc_progname,
-                   corpse, existat);
-            if (req_context.child_id == corpse)
-                req_context.child_id = 0;
+            call_caretaker(ncp);
         }
 
         /*
@@ -754,16 +759,7 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
         }
     }
     if (req_context.child_id) {
-        int   existat;
-        pid_t corpse;
-
-        if (req_context.whodied) {
-            corpse = waitpid(req_context.whodied, &existat, WNOHANG);
-        } else {
-            corpse = wait(&existat);
-        }
-        logmsg(ncp, 2, "%s: pid %d finished with %d\n", ncp->svc_progname,
-               corpse, existat);
+        call_caretaker(ncp);
     }
 
     /*
