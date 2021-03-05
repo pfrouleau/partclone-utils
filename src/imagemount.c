@@ -310,6 +310,33 @@ static struct {
     struct sigaction oldsig;
 } req_context;
 
+/* define our own type because sa_sigaction is not correctly seen (on ubuntu)*/
+typedef void (*signal_callback_t)(int sig, siginfo_t *si, void *vp);
+
+/*
+ * Handle termination signals.  Set finish flag and let service request loop
+ * finish up and potentially umount the filesystem.
+ */
+void
+nbd_finish(int sig, siginfo_t *si, void *vp) {
+    if (finishflag)
+        *finishflag = 1;
+}
+
+/*
+ * Handle child termination.  Set the toreapp value to allow the service
+ * request preamble to reap the particular child.
+ */
+static void
+nbd_reapchild(int sig, siginfo_t *si, void *vp) {
+    if (si && si->si_pid && toreapp) {
+        *toreapp = si->si_pid;
+    }
+    if (diedp) {
+        (*diedp)++;
+    }
+}
+
 static void
 init_signal(struct sigaction *newsig, struct sigaction *oldsig) {
     memset(newsig, 0, sizeof(*newsig));
@@ -336,35 +363,11 @@ init_request_context() {
 }
 
 static void
-set_signal(sa_sigaction sig_handler, int flags) {
+set_signal(signal_callback_t sig_handler, int flags) {
     req_context.newsig.sa_sigaction = sig_handler;
     req_context.newsig.sa_flags     = flags;
 
     sigaction(SIGCHLD, &req_context.newsig, &req_context.oldsig);
-}
-
-/*
- * Handle termination signals.  Set finish flag and let service request loop
- * finish up and potentially umount the filesystem.
- */
-void
-nbd_finish(int sig, siginfo_t *si, void *vp) {
-    if (finishflag)
-        *finishflag = 1;
-}
-
-/*
- * Handle child termination.  Set the toreapp value to allow the service
- * request preamble to reap the particular child.
- */
-static void
-nbd_reapchild(int sig, siginfo_t *si, void *vp) {
-    if (si && si->si_pid && toreapp) {
-        *toreapp = si->si_pid;
-    }
-    if (diedp) {
-        (*diedp)++;
-    }
 }
 
 /*
