@@ -302,7 +302,7 @@ static volatile int *  diedp      = (int *)NULL;
 static volatile pid_t *toreapp    = (pid_t *)NULL;
 
 static struct {
-    volatile int     timetoleave; /* <3: no; >=3: yes */
+    volatile int     timetoleave; /* 0: ??; 1: leave; 2: ??; >=3: yes */
     volatile int     someonedied; /*  0: no;  >0: yes */
     volatile pid_t   child_id;
     volatile pid_t   whodied;
@@ -538,7 +538,8 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
              * Calculate the required read buffer and adjust if necessary.
              */
             if (endblockoffs > startblockoffs) {
-                req_readbuf = blockcount * ncp->svc_blocksize;
+                int retry_count = 10;
+                req_readbuf     = blockcount * ncp->svc_blocksize;
                 while (req_readbuf > readbuf_size) {
                     char *nrbuf = malloc(req_readbuf);
 
@@ -546,22 +547,20 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
                         readbuf_size = req_readbuf;
                         free(readbuf);
                         readbuf = nrbuf;
+                    } else if (retry_count-- && req_readbuf < 0x80000000UL) {
+                        logmsg(ncp, 0,
+                               "[%s] retrying allocation of %d byte buffer (%d "
+                               "try left)\n",
+                               ncp->svc_progname, req_readbuf, retry_count);
+                        sleep(10);
                     } else {
-                        if (req_readbuf < 0x80000000UL) {
-                            logmsg(
-                                ncp, 0,
-                                "[%s] retrying allocation of %d byte buffer\n",
-                                ncp->svc_progname, req_readbuf);
-                            sleep(10);
-                        } else {
-                            logmsg(ncp, 0,
-                                   "[%s] not retrying allocation of %d byte "
-                                   "buffer\n",
-                                   ncp->svc_progname, req_readbuf);
-                            req_context.timetoleave = 1;
-                            error                   = ENOMEM;
-                            break;
-                        }
+                        logmsg(ncp, 0,
+                               "[%s] not retrying allocation of %d byte "
+                               "buffer\n",
+                               ncp->svc_progname, req_readbuf);
+                        req_context.timetoleave = 1;
+                        error                   = ENOMEM;
+                        break;
                     }
                 }
             }
