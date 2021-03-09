@@ -302,12 +302,15 @@ static volatile int *  diedp      = (int *)NULL;
 static volatile pid_t *toreapp    = (pid_t *)NULL;
 
 static struct {
-    volatile int     timetoleave; /* 0: ??; 1: leave; 2: ??; >=3: yes */
-    volatile int     someonedied; /*  0: no;  >0: yes */
-    volatile pid_t   child_id;
-    volatile pid_t   whodied;
-    struct sigaction newsig;
-    struct sigaction oldsig;
+    volatile int       timetoleave; /* 0: ??; 1: leave; 2: ??; >=3: yes */
+    volatile int       someonedied; /*  0: no;  >0: yes */
+    volatile pid_t     child_id;
+    volatile pid_t     whodied;
+    struct sigaction   newsig;
+    struct sigaction   oldsig;
+    struct nbd_request request;
+    size_t             readbuf_size;
+    uint8_t *          readbuf;
 } req_context;
 
 /* define our own type because sa_sigaction is not correctly seen (on ubuntu)*/
@@ -360,6 +363,9 @@ init_request_context() {
     toreapp    = &req_context.whodied;
 
     init_signal(&req_context.newsig, &req_context.oldsig);
+
+    req_context.readbuf_size = READBUF_INITIAL;
+    req_context.readbuf      = (uint8_t *)malloc(READBUF_INITIAL);
 }
 
 static void
@@ -448,6 +454,221 @@ call_caretaker(nbd_context_t *ncp) {
         req_context.child_id = 0;
 }
 
+static int
+handle_request(nbd_context_t *ncp, void *pctx) {
+    struct nbd_reply reply;
+    uint8_t *        replyappend = NULL;
+    int              error       = 0;
+    /*
+     * Calculate the start/end blocks.
+     */
+    off_t    offset         = NTOHLL(req_context.request.from);
+    size_t   length         = ntohl(req_context.request.len);
+    uint64_t startblockoffs = offset & ncp->svc_blockmask;
+    uint64_t sboffs         = offset & ncp->svc_offsetmask;
+    uint64_t endblockoffs   = (offset + length - 1) & ncp->svc_blockmask;
+    uint64_t eboffs         = (offset + length - 1) & ncp->svc_offsetmask;
+    uint64_t startblock     = startblockoffs / ncp->svc_blocksize;
+    uint64_t blockcount = (endblockoffs - startblockoffs) / ncp->svc_blocksize;
+    uint64_t req_readbuf;
+    size_t   rlength;
+
+    /*
+     * Adjust block count.
+     */
+    if (length)
+        blockcount++;
+
+    /*
+     * Calculate the required read buffer and adjust if necessary.
+     */
+    if (endblockoffs > startblockoffs) {
+        int retry_count = 10;
+        req_readbuf     = blockcount * ncp->svc_blocksize;
+        while (req_readbuf > req_context.readbuf_size) {
+            uint8_t *nrbuf = malloc(req_readbuf);
+
+            if (nrbuf) {
+                req_context.readbuf_size = req_readbuf;
+                free(req_context.readbuf);
+                req_context.readbuf = nrbuf;
+            } else if (retry_count-- && req_readbuf < 0x80000000UL) {
+                logmsg(ncp, 0,
+                       "[%s] retrying allocation of %d byte buffer (%d "
+                       "try left)\n",
+                       ncp->svc_progname, req_readbuf, retry_count);
+                sleep(10);
+            } else {
+                logmsg(ncp, 0,
+                       "[%s] not retrying allocation of %d byte "
+                       "buffer\n",
+                       ncp->svc_progname, req_readbuf);
+                req_context.timetoleave = 1;
+                error                   = ENOMEM;
+                break;
+            }
+        }
+    }
+
+    /*
+     * Verify that the message was correctly formed.
+     */
+    if (req_context.request.magic == htonl(NBD_REQUEST_MAGIC)) {
+        switch (ntohl(req_context.request.type)) {
+        case NBD_CMD_DISC:
+            logmsg(ncp, 1, "NBD_SHUTDOWN\n");
+            req_context.timetoleave = 1;
+            break;
+        case NBD_CMD_WRITE:
+            logmsg(ncp, 1, "NBD_WRITE0x%x@0x%x\n", length, offset);
+            if (sboffs) {
+                /* partial leading block write, ech. */
+                if (!(error = image_seek(pctx, startblock))) {
+                    error = image_readblocks(pctx, req_context.readbuf, 1);
+                }
+            } else {
+                error = 0;
+            }
+            if (!error) {
+                if ((eboffs != ncp->svc_offsetmask) && (blockcount != 1)) {
+                    /* partial trailing block write, double ech. */
+                    if (!(error =
+                              image_seek(pctx, startblock + blockcount - 1))) {
+                        error = image_readblocks(
+                            pctx,
+                            req_context.readbuf +
+                                ((blockcount - 1) * ncp->svc_blocksize),
+                            1);
+                    }
+                }
+                if (!error) {
+                    uint8_t *rembp  = req_context.readbuf;
+                    uint64_t remlen = length;
+                    for ((rembp = req_context.readbuf, remlen = length);
+                         !error && remlen;) {
+                        /*
+                         * Retry the read if we're interrupted but not
+                         * if it's time to leave.
+                         */
+                        while (((rlength = read(ncp->svc_fh, rembp, remlen)) ==
+                                -1) &&
+                               (errno == EINTR) && (!req_context.timetoleave))
+                            ;
+                        if (rlength == remlen) {
+                            if (!(error = image_seek(pctx, startblock)) &&
+                                !(error = image_writeblocks(
+                                      pctx, req_context.readbuf, blockcount))) {
+                                logmsg(ncp, 2,
+                                       "NBD_WRITE image write success\n");
+                            } else {
+                                logmsg(ncp, 1,
+                                       "NBD_WRITE: write fail %d (%s)\n", error,
+                                       strerror(error));
+                            }
+                        } else {
+                            if (rlength >= 0) {
+                                logmsg(ncp, 1,
+                                       "NBD_WRITE fail: short read of "
+                                       "data\n");
+                            } else {
+                                error = errno;
+                                logmsg(ncp, 1,
+                                       "NBD_WRITE fail: read fail %d "
+                                       "(%s)\n",
+                                       error, strerror(error));
+                            }
+                        }
+                        remlen -= rlength;
+                        rembp += rlength;
+                    }
+                } else {
+                    logmsg(ncp, 1, "NBD_WRITE: priming read fail %d (%s)\n",
+                           error, strerror(error));
+                }
+            } else {
+                logmsg(ncp, 1, "NBD_WRITE: lead priming read fail %d (%s)\n",
+                       error, strerror(error));
+            }
+            break;
+        case NBD_CMD_READ:
+            logmsg(ncp, 1, "NBD_READ 0x%x@0x%x\n", length, offset);
+            if (!(error = image_seek(pctx, startblock)) &&
+                !(error = image_readblocks(pctx, req_context.readbuf,
+                                           blockcount))) {
+                logmsg(ncp, 2, "NBD_READ image read success\n");
+                replyappend = &req_context.readbuf[sboffs];
+            } else {
+                logmsg(ncp, 2, "NBD_READ image read fail %d (%s)\n", error,
+                       strerror(error));
+            }
+            break;
+        default:
+            error = EINVAL;
+            break;
+        }
+
+        reply.magic = htonl(NBD_REPLY_MAGIC);
+        reply.error = error;
+        memcpy(reply.handle, req_context.request.handle, 8);
+
+        /*
+         * Retry the write if we're interrupted but if it's not time
+         * to leave.
+         */
+        while (((rlength = write(ncp->svc_fh, &reply, sizeof(reply))) == -1) &&
+               (errno == EINTR) && (!req_context.timetoleave))
+            ;
+        if (rlength == sizeof(reply)) {
+            /*
+             * Write the reply appendage if it's a read and there
+             * was no error.
+             */
+            if ((req_context.request.type == htonl(NBD_CMD_READ)) &&
+                (reply.error == 0)) {
+                /*
+                 * Write the data reply.
+                 */
+                while (((rlength = write(ncp->svc_fh, replyappend, length)) ==
+                        -1) &&
+                       (errno == EINTR) && (!req_context.timetoleave))
+                    ;
+                if (rlength == length) {
+                    error = 0;
+                } else {
+                    if (rlength == -1) {
+                        error = errno;
+                        logmsg(ncp, 0, "[%s] reply addendum write error: %s\n",
+                               ncp->svc_progname, strerror(error));
+                    }
+                }
+            }
+        } else {
+            if ((rlength == -1) && (errno != EINTR)) {
+                error = errno;
+                logmsg(ncp, 0, "[%s] reply write error: %s\n",
+                       ncp->svc_progname, strerror(error));
+            }
+        }
+    } else {
+        logmsg(ncp, 1, "[%s] Bad message from kernel: %08x\n",
+               ncp->svc_progname, req_context.request.magic);
+        /*
+         * It's unclear what to do here.  We've obviously lost sync
+         * with the kernel.  Will reading 32-bit quantities until we
+         * get back in sync work?  I dunno.  Without the following
+         * snippet, we read nbd_requests until we (hopefully) get
+         * back in sync.  The question then is if the kernel is
+         * waiting for a response, then we're completely hosed.
+         */
+#ifdef POTENTIAL_DISASTER
+        req_context.timetoleave = 1;
+        error                   = EIO;
+#endif /* POTENTIAL_DISASTER */
+    }
+
+    return error;
+}
+
 /*
  * Handle NBD resquest
  *
@@ -456,17 +677,15 @@ call_caretaker(nbd_context_t *ncp) {
  */
 static int
 nbd_service_requests(nbd_context_t *ncp, void *pctx) {
-    char * readbuf      = (char *)malloc(READBUF_INITIAL);
-    char * pidfile      = (char *)NULL;
-    size_t readbuf_size = READBUF_INITIAL;
-    int    error        = 0;
+    char *pidfile = (char *)NULL;
+    int   error   = 0;
 
     init_request_context();
 
     /*
      * Make sure we have a read buffer.
      */
-    if (!readbuf) {
+    if (!req_context.readbuf) {
         req_context.timetoleave = 3;
         error                   = ENOMEM;
     }
@@ -502,8 +721,7 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
      * Do work until we're completely done.
      */
     while (req_context.timetoleave < 3) {
-        struct nbd_request request;
-        size_t             rlength;
+        size_t rlength;
 
         /*
          * If signalled that someone died, reap the child to avoid zombies.
@@ -515,232 +733,15 @@ nbd_service_requests(nbd_context_t *ncp, void *pctx) {
         /*
          * Read a request.
          */
-        if ((rlength = read(ncp->svc_fh, &request, sizeof(request))) ==
-            sizeof(request)) {
-            struct nbd_reply reply;
-            char *           replyappend = (char *)NULL;
-            /*
-             * Calculate the start/end blocks.
-             */
-            off_t    offset         = NTOHLL(request.from);
-            size_t   length         = ntohl(request.len);
-            uint64_t startblockoffs = offset & ncp->svc_blockmask;
-            uint64_t sboffs         = offset & ncp->svc_offsetmask;
-            uint64_t endblockoffs = (offset + length - 1) & ncp->svc_blockmask;
-            uint64_t eboffs       = (offset + length - 1) & ncp->svc_offsetmask;
-            uint64_t startblock   = startblockoffs / ncp->svc_blocksize;
-            uint64_t blockcount =
-                (endblockoffs - startblockoffs) / ncp->svc_blocksize;
-            uint64_t req_readbuf;
-
-            /*
-             * Adjust block count.
-             */
-            if (length)
-                blockcount++;
-
-            /*
-             * Calculate the required read buffer and adjust if necessary.
-             */
-            if (endblockoffs > startblockoffs) {
-                int retry_count = 10;
-                req_readbuf     = blockcount * ncp->svc_blocksize;
-                while (req_readbuf > readbuf_size) {
-                    char *nrbuf = malloc(req_readbuf);
-
-                    if (nrbuf) {
-                        readbuf_size = req_readbuf;
-                        free(readbuf);
-                        readbuf = nrbuf;
-                    } else if (retry_count-- && req_readbuf < 0x80000000UL) {
-                        logmsg(ncp, 0,
-                               "[%s] retrying allocation of %d byte buffer (%d "
-                               "try left)\n",
-                               ncp->svc_progname, req_readbuf, retry_count);
-                        sleep(10);
-                    } else {
-                        logmsg(ncp, 0,
-                               "[%s] not retrying allocation of %d byte "
-                               "buffer\n",
-                               ncp->svc_progname, req_readbuf);
-                        req_context.timetoleave = 1;
-                        error                   = ENOMEM;
-                        break;
-                    }
-                }
-            }
-
-            /*
-             * Verify that the message was correctly formed.
-             */
-            if (request.magic == htonl(NBD_REQUEST_MAGIC)) {
-                switch (ntohl(request.type)) {
-                case NBD_CMD_DISC:
-                    logmsg(ncp, 1, "NBD_SHUTDOWN\n");
-                    req_context.timetoleave = 1;
-                    break;
-                case NBD_CMD_WRITE:
-                    logmsg(ncp, 1, "NBD_WRITE0x%x@0x%x\n", length, offset);
-                    if (sboffs) {
-                        /* partial leading block write, ech. */
-                        if (!(error = image_seek(pctx, startblock))) {
-                            error = image_readblocks(pctx, readbuf, 1);
-                        }
-                    } else {
-                        error = 0;
-                    }
-                    if (!error) {
-                        if ((eboffs != ncp->svc_offsetmask) &&
-                            (blockcount != 1)) {
-                            /* partial trailing block write, double ech. */
-                            if (!(error = image_seek(
-                                      pctx, startblock + blockcount - 1))) {
-                                error = image_readblocks(
-                                    pctx,
-                                    readbuf +
-                                        ((blockcount - 1) * ncp->svc_blocksize),
-                                    1);
-                            }
-                        }
-                        if (!error) {
-                            char *   rembp  = readbuf;
-                            uint64_t remlen = length;
-                            for ((rembp = readbuf, remlen = length);
-                                 !error && remlen;) {
-                                /*
-                                 * Retry the read if we're interrupted but not
-                                 * if it's time to leave.
-                                 */
-                                while (((rlength = read(ncp->svc_fh, rembp,
-                                                        remlen)) == -1) &&
-                                       (errno == EINTR) &&
-                                       (!req_context.timetoleave))
-                                    ;
-                                if (rlength == remlen) {
-                                    if (!(error =
-                                              image_seek(pctx, startblock)) &&
-                                        !(error = image_writeblocks(
-                                              pctx, readbuf, blockcount))) {
-                                        logmsg(
-                                            ncp, 2,
-                                            "NBD_WRITE image write success\n");
-                                    } else {
-                                        logmsg(
-                                            ncp, 1,
-                                            "NBD_WRITE: write fail %d (%s)\n",
-                                            error, strerror(error));
-                                    }
-                                } else {
-                                    if (rlength >= 0) {
-                                        logmsg(ncp, 1,
-                                               "NBD_WRITE fail: short read of "
-                                               "data\n");
-                                    } else {
-                                        error = errno;
-                                        logmsg(ncp, 1,
-                                               "NBD_WRITE fail: read fail %d "
-                                               "(%s)\n",
-                                               error, strerror(error));
-                                    }
-                                }
-                                remlen -= rlength;
-                                rembp += rlength;
-                            }
-                        } else {
-                            logmsg(ncp, 1,
-                                   "NBD_WRITE: priming read fail %d (%s)\n",
-                                   error, strerror(error));
-                        }
-                    } else {
-                        logmsg(ncp, 1,
-                               "NBD_WRITE: lead priming read fail %d (%s)\n",
-                               error, strerror(error));
-                    }
-                    break;
-                case NBD_CMD_READ:
-                    logmsg(ncp, 1, "NBD_READ 0x%x@0x%x\n", length, offset);
-                    if (!(error = image_seek(pctx, startblock)) &&
-                        !(error =
-                              image_readblocks(pctx, readbuf, blockcount))) {
-                        logmsg(ncp, 2, "NBD_READ image read success\n");
-                        replyappend = &readbuf[sboffs];
-                    } else {
-                        logmsg(ncp, 2, "NBD_READ image read fail %d (%s)\n",
-                               error, strerror(error));
-                    }
-                    break;
-                default:
-                    error = EINVAL;
-                    break;
-                }
-
-                reply.magic = htonl(NBD_REPLY_MAGIC);
-                reply.error = error;
-                memcpy(reply.handle, request.handle, 8);
-
-                /*
-                 * Retry the write if we're interrupted but if it's not time
-                 * to leave.
-                 */
-                while (((rlength = write(ncp->svc_fh, &reply, sizeof(reply))) ==
-                        -1) &&
-                       (errno == EINTR) && (!req_context.timetoleave))
-                    ;
-                if (rlength == sizeof(reply)) {
-                    /*
-                     * Write the reply appendage if it's a read and there
-                     * was no error.
-                     */
-                    if ((request.type == htonl(NBD_CMD_READ)) &&
-                        (reply.error == 0)) {
-                        /*
-                         * Write the data reply.
-                         */
-                        while (((rlength = write(ncp->svc_fh, replyappend,
-                                                 length)) == -1) &&
-                               (errno == EINTR) && (!req_context.timetoleave))
-                            ;
-                        if (rlength == length) {
-                            error = 0;
-                        } else {
-                            if (rlength == -1) {
-                                error = errno;
-                                logmsg(ncp, 0,
-                                       "[%s] reply addendum write error: %s\n",
-                                       ncp->svc_progname, strerror(error));
-                            }
-                        }
-                    }
-                } else {
-                    if ((rlength == -1) && (errno != EINTR)) {
-                        error = errno;
-                        logmsg(ncp, 0, "[%s] reply write error: %s\n",
-                               ncp->svc_progname, strerror(error));
-                    }
-                }
-            } else {
-                logmsg(ncp, 1, "[%s] Bad message from kernel: %08x\n",
-                       ncp->svc_progname, request.magic);
-                /*
-                 * It's unclear what to do here.  We've obviously lost sync
-                 * with the kernel.  Will reading 32-bit quantities until we
-                 * get back in sync work?  I dunno.  Without the following
-                 * snippet, we read nbd_requests until we (hopefully) get
-                 * back in sync.  The question then is if the kernel is
-                 * waiting for a response, then we're completely hosed.
-                 */
-#ifdef POTENTIAL_DISASTER
-                req_context.timetoleave = 1;
-                error                   = EIO;
-#endif /* POTENTIAL_DISASTER */
-            }
-        } else {
-            if ((rlength == -1) && (errno != EINTR)) {
-                error = errno;
-                logmsg(ncp, 0, "[%s] kernel command read error: %s\n",
-                       ncp->svc_progname, strerror(error));
-            }
-        }
+        rlength = read(ncp->svc_fh, &req_context.request,
+                       sizeof(req_context.request));
+        if (rlength == sizeof(req_context.request)) {
+            error = handle_request(ncp, pctx);
+        } else if ((rlength == -1) && (errno != EINTR)) {
+            error = errno;
+            logmsg(ncp, 0, "[%s] kernel command read error: %s\n",
+                   ncp->svc_progname, strerror(error));
+        } /* else ignore the request? */
 
         /*
          * Check to see if we received a termination signal.
