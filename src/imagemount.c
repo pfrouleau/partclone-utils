@@ -455,10 +455,146 @@ call_caretaker(nbd_context_t *ncp) {
 }
 
 static int
-handle_request(nbd_context_t *ncp, void *pctx) {
+send_reply(nbd_context_t *ncp, int request_result) {
     struct nbd_reply reply;
-    uint8_t *        replyappend = NULL;
-    int              error       = 0;
+
+    int wlength;
+    int error = 0;
+
+    reply.magic = htonl(NBD_REPLY_MAGIC);
+    reply.error = request_result;
+    memcpy(reply.handle, req_context.request.handle, 8);
+
+    /*
+     * Retry the write if we're interrupted but if it's not time
+     * to leave.
+     */
+    while (((wlength = write(ncp->svc_fh, &reply, sizeof(reply))) == -1) &&
+           (errno == EINTR) && (!req_context.timetoleave))
+        ;
+
+    if ((wlength == -1) && (errno != EINTR)) {
+        error = errno;
+        logmsg(ncp, 0, "[%s] reply write error: %s\n", ncp->svc_progname,
+               strerror(error));
+    } /* else if (wlength != sizeof(reply)) ??? */
+
+    return error;
+}
+
+static int
+handle_read_request(nbd_context_t *ncp, void *pctx, size_t length, off_t offset,
+                    uint64_t startblock, uint64_t blockcount, uint64_t sboffs) {
+    int error   = 0;
+    int wlength = 0;
+
+    logmsg(ncp, 1, "NBD_READ 0x%x@0x%x\n", length, offset);
+
+    if ((error = image_seek(pctx, startblock)) ||
+        (error = image_readblocks(pctx, req_context.readbuf, blockcount))) {
+        logmsg(ncp, 2, "NBD_READ image read fail %d (%s)\n", error,
+               strerror(error));
+        return error;
+    }
+
+    logmsg(ncp, 2, "NBD_READ image read success\n");
+
+    uint8_t const *replyappend = req_context.readbuf + sboffs;
+
+    error = send_reply(ncp, error);
+    if (error)
+        return error;
+
+    /*
+     * Write the data reply.
+     */
+    while (((wlength = write(ncp->svc_fh, replyappend, length)) == -1) &&
+           (errno == EINTR) && (!req_context.timetoleave))
+        ;
+
+    if (wlength == -1 && errno != EINTR) {
+        error = errno;
+        logmsg(ncp, 0, "[%s] reply addendum write error: %s\n",
+               ncp->svc_progname, strerror(error));
+    } /* else if (wlength != length) ??? */
+
+    return error;
+}
+
+static int
+handle_write_request(nbd_context_t *ncp, void *pctx, size_t length,
+                     off_t offset, uint64_t startblock, uint64_t blockcount,
+                     uint64_t sboffs, uint64_t eboffs) {
+    int error = 0;
+    int rlength;
+
+    logmsg(ncp, 1, "NBD_WRITE0x%x@0x%x\n", length, offset);
+    if (sboffs) {
+        /* partial leading block write, ech. */
+        if (!(error = image_seek(pctx, startblock))) {
+            error = image_readblocks(pctx, req_context.readbuf, 1);
+        }
+
+        if (error) {
+            logmsg(ncp, 1, "NBD_WRITE: lead priming read fail %d (%s)\n", error,
+                   strerror(error));
+            return error;
+        }
+    }
+
+    if ((eboffs != ncp->svc_offsetmask) && (blockcount != 1)) {
+        /* partial trailing block write, double ech. */
+        if (!(error = image_seek(pctx, startblock + blockcount - 1))) {
+            error = image_readblocks(
+                pctx,
+                req_context.readbuf + ((blockcount - 1) * ncp->svc_blocksize),
+                1);
+        }
+
+        if (error) {
+            logmsg(ncp, 1, "NBD_WRITE: priming read fail %d (%s)\n", error,
+                   strerror(error));
+
+            return error;
+        }
+    }
+
+    uint8_t *rembp  = req_context.readbuf;
+    uint64_t remlen = length;
+    for ((rembp = req_context.readbuf, remlen = length); !error && remlen;) {
+        /*
+         * Retry the read if we're interrupted but not
+         * if it's time to leave.
+         */
+        while (((rlength = read(ncp->svc_fh, rembp, remlen)) == -1) &&
+               (errno == EINTR) && (!req_context.timetoleave))
+            ;
+
+        if (rlength == -1) {
+            error = errno;
+            logmsg(ncp, 1, "NBD_WRITE fail: read fail %d (%s)\n", error,
+                   strerror(error));
+        } else if (rlength != remlen) {
+            logmsg(ncp, 1, "NBD_WRITE fail: short read of data\n");
+        } else if (!(error = image_seek(pctx, startblock)) &&
+                   !(error = image_writeblocks(pctx, req_context.readbuf,
+                                               blockcount))) {
+            logmsg(ncp, 2, "NBD_WRITE image write success\n");
+        } else {
+            logmsg(ncp, 1, "NBD_WRITE: write fail %d (%s)\n", error,
+                   strerror(error));
+        }
+
+        remlen -= rlength;
+        rembp += rlength;
+    }
+
+    return error;
+}
+
+static int
+handle_request(nbd_context_t *ncp, void *pctx) {
+    int error = 0;
     /*
      * Calculate the start/end blocks.
      */
@@ -470,8 +606,6 @@ handle_request(nbd_context_t *ncp, void *pctx) {
     uint64_t eboffs         = (offset + length - 1) & ncp->svc_offsetmask;
     uint64_t startblock     = startblockoffs / ncp->svc_blocksize;
     uint64_t blockcount = (endblockoffs - startblockoffs) / ncp->svc_blocksize;
-    uint64_t req_readbuf;
-    size_t   rlength;
 
     /*
      * Adjust block count.
@@ -482,9 +616,10 @@ handle_request(nbd_context_t *ncp, void *pctx) {
     /*
      * Calculate the required read buffer and adjust if necessary.
      */
-    if (endblockoffs > startblockoffs) {
-        int retry_count = 10;
-        req_readbuf     = blockcount * ncp->svc_blocksize;
+    if (length > 0 && endblockoffs > startblockoffs) {
+        int      retry_count = 10;
+        uint64_t req_readbuf = blockcount * ncp->svc_blocksize;
+
         while (req_readbuf > req_context.readbuf_size) {
             uint8_t *nrbuf = malloc(req_readbuf);
 
@@ -515,139 +650,23 @@ handle_request(nbd_context_t *ncp, void *pctx) {
      */
     if (req_context.request.magic == htonl(NBD_REQUEST_MAGIC)) {
         switch (ntohl(req_context.request.type)) {
-        case NBD_CMD_DISC:
-            logmsg(ncp, 1, "NBD_SHUTDOWN\n");
-            req_context.timetoleave = 1;
+        case NBD_CMD_READ:
+            error = handle_read_request(ncp, pctx, length, offset, startblock,
+                                        blockcount, sboffs);
             break;
         case NBD_CMD_WRITE:
-            logmsg(ncp, 1, "NBD_WRITE0x%x@0x%x\n", length, offset);
-            if (sboffs) {
-                /* partial leading block write, ech. */
-                if (!(error = image_seek(pctx, startblock))) {
-                    error = image_readblocks(pctx, req_context.readbuf, 1);
-                }
-            } else {
-                error = 0;
-            }
-            if (!error) {
-                if ((eboffs != ncp->svc_offsetmask) && (blockcount != 1)) {
-                    /* partial trailing block write, double ech. */
-                    if (!(error =
-                              image_seek(pctx, startblock + blockcount - 1))) {
-                        error = image_readblocks(
-                            pctx,
-                            req_context.readbuf +
-                                ((blockcount - 1) * ncp->svc_blocksize),
-                            1);
-                    }
-                }
-                if (!error) {
-                    uint8_t *rembp  = req_context.readbuf;
-                    uint64_t remlen = length;
-                    for ((rembp = req_context.readbuf, remlen = length);
-                         !error && remlen;) {
-                        /*
-                         * Retry the read if we're interrupted but not
-                         * if it's time to leave.
-                         */
-                        while (((rlength = read(ncp->svc_fh, rembp, remlen)) ==
-                                -1) &&
-                               (errno == EINTR) && (!req_context.timetoleave))
-                            ;
-                        if (rlength == remlen) {
-                            if (!(error = image_seek(pctx, startblock)) &&
-                                !(error = image_writeblocks(
-                                      pctx, req_context.readbuf, blockcount))) {
-                                logmsg(ncp, 2,
-                                       "NBD_WRITE image write success\n");
-                            } else {
-                                logmsg(ncp, 1,
-                                       "NBD_WRITE: write fail %d (%s)\n", error,
-                                       strerror(error));
-                            }
-                        } else {
-                            if (rlength >= 0) {
-                                logmsg(ncp, 1,
-                                       "NBD_WRITE fail: short read of "
-                                       "data\n");
-                            } else {
-                                error = errno;
-                                logmsg(ncp, 1,
-                                       "NBD_WRITE fail: read fail %d "
-                                       "(%s)\n",
-                                       error, strerror(error));
-                            }
-                        }
-                        remlen -= rlength;
-                        rembp += rlength;
-                    }
-                } else {
-                    logmsg(ncp, 1, "NBD_WRITE: priming read fail %d (%s)\n",
-                           error, strerror(error));
-                }
-            } else {
-                logmsg(ncp, 1, "NBD_WRITE: lead priming read fail %d (%s)\n",
-                       error, strerror(error));
-            }
+            error = handle_write_request(ncp, pctx, length, offset, startblock,
+                                         blockcount, sboffs, eboffs);
             break;
-        case NBD_CMD_READ:
-            logmsg(ncp, 1, "NBD_READ 0x%x@0x%x\n", length, offset);
-            if (!(error = image_seek(pctx, startblock)) &&
-                !(error = image_readblocks(pctx, req_context.readbuf,
-                                           blockcount))) {
-                logmsg(ncp, 2, "NBD_READ image read success\n");
-                replyappend = &req_context.readbuf[sboffs];
-            } else {
-                logmsg(ncp, 2, "NBD_READ image read fail %d (%s)\n", error,
-                       strerror(error));
-            }
+        case NBD_CMD_DISC:
+            req_context.timetoleave = 1;
+            logmsg(ncp, 1, "NBD_SHUTDOWN\n");
+            error = send_reply(ncp, error);
             break;
         default:
+            logmsg(ncp, 1, "Unknown request type\n");
             error = EINVAL;
             break;
-        }
-
-        reply.magic = htonl(NBD_REPLY_MAGIC);
-        reply.error = error;
-        memcpy(reply.handle, req_context.request.handle, 8);
-
-        /*
-         * Retry the write if we're interrupted but if it's not time
-         * to leave.
-         */
-        while (((rlength = write(ncp->svc_fh, &reply, sizeof(reply))) == -1) &&
-               (errno == EINTR) && (!req_context.timetoleave))
-            ;
-        if (rlength == sizeof(reply)) {
-            /*
-             * Write the reply appendage if it's a read and there
-             * was no error.
-             */
-            if ((req_context.request.type == htonl(NBD_CMD_READ)) &&
-                (reply.error == 0)) {
-                /*
-                 * Write the data reply.
-                 */
-                while (((rlength = write(ncp->svc_fh, replyappend, length)) ==
-                        -1) &&
-                       (errno == EINTR) && (!req_context.timetoleave))
-                    ;
-                if (rlength == length) {
-                    error = 0;
-                } else {
-                    if (rlength == -1) {
-                        error = errno;
-                        logmsg(ncp, 0, "[%s] reply addendum write error: %s\n",
-                               ncp->svc_progname, strerror(error));
-                    }
-                }
-            }
-        } else {
-            if ((rlength == -1) && (errno != EINTR)) {
-                error = errno;
-                logmsg(ncp, 0, "[%s] reply write error: %s\n",
-                       ncp->svc_progname, strerror(error));
-            }
         }
     } else {
         logmsg(ncp, 1, "[%s] Bad message from kernel: %08x\n",
