@@ -27,13 +27,13 @@ initial_setup() {
 }
 
 reset() {
-    mkdir $PARTCLONE_MOUNT_POINT 2>/dev/null || true
-    mkdir $RAW_FS_IMAGE_MOUNT_POINT 2>/dev/null || true
+    mkdir -p $PARTCLONE_MOUNT_POINT || exit
+    mkdir -p $RAW_FS_IMAGE_MOUNT_POINT || exit
     sudo umount $RAW_FS_IMAGE_MOUNT_POINT 2>/dev/null || true
     sudo umount $PARTCLONE_MOUNT_POINT 2>/dev/null || true
+    sudo nbd-client -d $NBD || true
     sudo pkill imagemount || true
     sudo pkill partclone-nbd || true
-    sudo nbd-client -d $NBD || true
 }
 
 on_exit() {
