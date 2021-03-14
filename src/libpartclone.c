@@ -128,7 +128,6 @@ v1_init(pc_context_t *pcp) {
 
     if (PCTX_VALID(pcp)) {
         if ((error = (*pcp->pc_sysdep->sys_malloc)(&v1p, sizeof(*v1p))) == 0) {
-            int i;
             memset(v1p, 0, sizeof(*v1p));
             pcp->pc_verdep = v1p;
             pcp->pc_flags |= (PC_HAVE_VERDEP | PC_VERSION_INIT);
@@ -146,28 +145,14 @@ v1_init(pc_context_t *pcp) {
                      */
                     error = 0;
                 }
-            } else {
-                if ((int)pcp->pc_omode < (int)SYSDEP_OPEN_RW)
-                    pcp->pc_flags |= PC_READ_ONLY;
-                else
-                    /*
-                     * Completely discard errors here.
-                     */
-                    error = 0;
-            }
-            /*
-             * Initialize the CRC table.
-             */
-            for (i = 0; i < CRC_TABLE_LEN; i++) {
-                int      j;
-                uint32_t init_crc = (uint32_t)i;
-                for (j = 0; j < CRC_UNIT_BITS; j++) {
-                    init_crc = (init_crc & 0x00000001L)
-                                   ? (init_crc >> 1) ^ 0xEDB88320L
-                                   : (init_crc >> 1);
-                }
-                v1p->v1_crc_tab32[i] = init_crc;
-            }
+            } else if ((int)pcp->pc_omode < (int)SYSDEP_OPEN_RW)
+                pcp->pc_flags |= PC_READ_ONLY;
+            else
+                /*
+                 * Completely discard errors here.
+                 */
+                error = 0;
+            init_crc32();
             v1p->v1_bitmap_factor = V1_DEFAULT_FACTOR;
         }
     }
