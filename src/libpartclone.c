@@ -254,6 +254,44 @@ copy_ntfs_boot_sector(pc_context_t *pcp) {
     return 0;
 }
 
+static int v1_readblock(pc_context_t *pcp, void *buffer);
+static int
+v1_readblock_ntfs_shim(pc_context_t *pcp, void *buffer) {
+    /*
+     * Simulate the backup boot sector if it is accessed
+     */
+    if (pcp->pc_curblock == (pcp->pc_head.totalblock - 1)) {
+        int pad_size = pcp->pc_head.block_size - SECTOR_SIZE;
+
+        memset(buffer, 0, pad_size);
+        memcpy(buffer + pad_size, pcp->pc_ntfs_boot, SECTOR_SIZE);
+
+        return 0;
+    }
+    int error = v1_readblock(pcp, buffer);
+    return error;
+}
+
+static v_dispatch_table_t ntfs_dispatch_table;
+
+/*
+ * Use shims to simulate the NTFS backup boot sector which is missing from
+ * the image.
+ */
+static void
+install_ntfs_shims(pc_context_t *pcp) {
+    memcpy(&ntfs_dispatch_table, pcp->pc_dispatch, sizeof(ntfs_dispatch_table));
+
+    ntfs_dispatch_table.version_readblock = v1_readblock_ntfs_shim;
+
+    pcp->pc_dispatch = &ntfs_dispatch_table;
+
+    /*
+     * Increase the total blocks to report the simulated size to nbd driver.
+     */
+    ++pcp->pc_head.totalblock;
+}
+
 static int
 is_expected_ntfs_image_sig(char const *fs_sig) {
 
@@ -329,6 +367,9 @@ v1_verify(pc_context_t *pcp) {
                         (memcmp(magicstr, cmagicstr, sizeof(magicstr)) == 0)) {
                         if (v1_is_ntfs_image(pcp)) {
                             error = copy_ntfs_boot_sector(pcp);
+                            if (!error) {
+                                install_ntfs_shims(pcp);
+                            }
                         }
                         if (error == 0)
                             error = precalculate_sumcount(pcp);
@@ -616,6 +657,9 @@ v2_verify(pc_context_t *pcp) {
 
                             if (v2_is_ntfs_image(pcp)) {
                                 error = copy_ntfs_boot_sector(pcp);
+                                if (!error) {
+                                    install_ntfs_shims(pcp);
+                                }
                             }
 
                             if (error == 0) {
