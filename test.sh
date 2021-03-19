@@ -10,6 +10,7 @@ if [ "$#" -eq 1 ] && [ "$1" == "debug" ]; then
     set -x
 fi
 
+PC_NBD="../partclone-nbd/build/partclone-nbd"
 RAW_FS_IMAGE=/tmp/raw-fs-image
 RAW_FS_IMAGE_MOUNT_POINT=/tmp/mount-raw-fs-image
 PARTCLONE_IMAGE=/tmp/partclone-image
@@ -57,12 +58,12 @@ _install_partclone() {
 }
 
 install_partclone() {
-    mkdir -p ~/partclone
-    [ -d ~/partclone/v1 ] || git clone https://github.com/Thomas-Tsai/partclone ~/partclone/v1 2> /dev/null
-    [ -d ~/partclone/v2 ] || git clone ~/partclone/v1 ~/partclone/v2 2> /dev/null
+    mkdir -p test/partclone
+    [ -d test/partclone/v1 ] || git clone https://github.com/Thomas-Tsai/partclone test/partclone/v1 2> /dev/null
+    [ -d test/partclone/v2 ] || git clone -l test/partclone/v1 test/partclone/v2 2> /dev/null
 
-    _install_partclone ~/partclone/v1 0.2.73
-    _install_partclone ~/partclone/v2 master
+    _install_partclone test/partclone/v1 0.2.73
+    _install_partclone test/partclone/v2 master
 }
 
 check_generic() {
@@ -144,7 +145,7 @@ go() {
 
         # Create partclone image
         sudo rm -f $PARTCLONE_IMAGE
-        sudo ~/partclone/$VER/src/partclone.$PC_FS --clone --source $RAW_FS_IMAGE --output $PARTCLONE_IMAGE 2>/dev/null 
+        sudo test/partclone/$VER/src/partclone.$PC_FS --clone --source $RAW_FS_IMAGE --output $PARTCLONE_IMAGE 2>/dev/null
         if [ $? -ne 0 ]; then
             ERROR_MESSAGE="partclone.$PC_FS reported error"
             return 1
@@ -162,7 +163,7 @@ go() {
         fi
 
         if [ "z$PROG" == "zpartclone-nbd" ]; then
-            sudo ../partclone-nbd/build/partclone-nbd -c -d $NBD $PARTCLONE_IMAGE >/dev/zero 2>/dev/null &
+            sudo $PC_NBD -c -d $NBD $PARTCLONE_IMAGE >/dev/zero 2>/dev/null &
             if [ $? -ne 0 ]; then
                 ERROR_MESSAGE="partclone-nbd reported error"
                 return 1
@@ -191,7 +192,7 @@ go() {
         RED='\033[0;31m'
         NC='\033[0m' # No Color
         if __go; then
-            echo -e "${GREEN}[OK  ]${NC}"
+            echo -e "${GREEN}[ OK ]${NC}"
         else
             echo -e "${RED}[FAIL]${NC}"
             ERR=1
@@ -200,7 +201,8 @@ go() {
         echo " $ERROR_MESSAGE"
     }
 
-    for PROG in partclone-utils-imagemount partclone-nbd; do
+
+    for PROG in $PROGS; do
         _go v1 $PROG
         _go v2 $PROG
     done
@@ -210,9 +212,18 @@ ERR=1
 
 for VER in v1 v2; do
     for PC_FS in extfs fat f2fs ntfs; do
-        [ -f ~/partclone/$VER/src/partclone.$PC_FS ] || install_partclone
+        [ -f test/partclone/$VER/src/partclone.$PC_FS ] || install_partclone
     done
 done
+
+PROGS=partclone-utils-imagemount
+
+if [[ -f $PC_NBD ]]; then
+    PROGS="$PROGS partclone-nbd"
+else
+    echo "INFO: partclone-nbd not present in $PC_NBD;"
+    echo "INFO: Related tests are disabled."
+fi >&2
 
 initial_setup
 
