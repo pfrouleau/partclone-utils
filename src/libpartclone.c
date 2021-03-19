@@ -117,6 +117,8 @@ typedef struct version_1_context {
     uint16_t v1_bitmap_factor; /* log2(entries)/index */
 } v1_context_t;
 
+static void install_ntfs_shims(pc_context_t *pcp);
+
 /*
  * Initialize version 1 file handling.
  *
@@ -310,7 +312,8 @@ v1_verify(pc_context_t *pcp) {
          * Verify the header magic.
          */
         if (memcmp(pcp->pc_head_v1.magic, IMAGE_MAGIC, IMAGE_MAGIC_SIZE) == 0) {
-            v1_context_t *v1p = (v1_context_t *)pcp->pc_verdep;
+            v1_context_t *v1p                 = (v1_context_t *)pcp->pc_verdep;
+            int           missing_block_count = 0;
 
             pcp->pc_head.block_size          = pcp->pc_head_v1.block_size;
             pcp->pc_head.totalblock          = pcp->pc_head_v1.totalblock;
@@ -321,11 +324,16 @@ v1_verify(pc_context_t *pcp) {
                 sizeof(pcp->pc_head_v1) + pcp->pc_head.totalblock + MAGIC_LEN;
 
             pcp->pc_flags |= PC_HEAD_VALID;
+
+            if (v1_is_ntfs_image(pcp))
+                missing_block_count = 1;
+
             /*
              * Allocate and fill the bitmap.
              */
             if ((error = (*pcp->pc_sysdep->sys_malloc)(
-                     &v1p->v1_bitmap, pcp->pc_head.totalblock)) == 0) {
+                     &v1p->v1_bitmap,
+                     pcp->pc_head.totalblock + missing_block_count)) == 0) {
                 uint64_t r_size;
 
                 (void)(*pcp->pc_sysdep->sys_seek)(
@@ -346,6 +354,9 @@ v1_verify(pc_context_t *pcp) {
                         (memcmp(magicstr, cmagicstr, sizeof(magicstr)) == 0)) {
                         if (v1_is_ntfs_image(pcp)) {
                             error = copy_ntfs_boot_sector(pcp);
+                            if (!error) {
+                                install_ntfs_shims(pcp);
+                            }
                         }
                         if (error == 0)
                             error = precalculate_sumcount(pcp);
@@ -503,6 +514,43 @@ v1_readblock(pc_context_t *pcp, void *buffer) {
     return error;
 }
 
+static int
+v1_readblock_ntfs_shim(pc_context_t *pcp, void *buffer) {
+    /*
+     * Simulate the backup boot sector if it is accessed
+     */
+    if (pcp->pc_curblock == (pcp->pc_head.totalblock - 1)) {
+        int pad_size = pcp->pc_head.block_size - SECTOR_SIZE;
+
+        memset(buffer, 0, pad_size);
+        memcpy(buffer + pad_size, pcp->pc_ntfs_boot, SECTOR_SIZE);
+
+        return 0;
+    }
+    int error = v1_readblock(pcp, buffer);
+    return error;
+}
+
+static v_dispatch_table_t ntfs_dispatch_table;
+
+/*
+ * Use shims to simulate the NTFS backup boot sector which is missing from
+ * the image.
+ */
+static void
+install_ntfs_shims(pc_context_t *pcp) {
+    memcpy(&ntfs_dispatch_table, pcp->pc_dispatch, sizeof(ntfs_dispatch_table));
+
+    ntfs_dispatch_table.version_readblock = v1_readblock_ntfs_shim;
+
+    pcp->pc_dispatch = &ntfs_dispatch_table;
+
+    /*
+     * Increase the total blocks to report the simulated size to nbd driver.
+     */
+    ++pcp->pc_head.totalblock;
+}
+
 /*
  * Is the current block in use?
  */
@@ -588,7 +636,8 @@ v2_verify(pc_context_t *pcp) {
          * Verify the header magic.
          */
         if (memcmp(pcp->pc_head_v2.magic, IMAGE_MAGIC, IMAGE_MAGIC_SIZE) == 0) {
-            v1_context_t *v1p = (v1_context_t *)pcp->pc_verdep;
+            v1_context_t *v1p                 = (v1_context_t *)pcp->pc_verdep;
+            int           missing_block_count = 0;
 
             pcp->pc_head.block_size    = pcp->pc_head_v2.block_size;
             pcp->pc_head.totalblock    = pcp->pc_head_v2.totalblock;
@@ -606,11 +655,16 @@ v2_verify(pc_context_t *pcp) {
                 sizeof(pcp->pc_head_v2) + bitmap_size + CRC_SIZE;
 
             pcp->pc_flags |= PC_HEAD_VALID;
+
+            if (v2_is_ntfs_image(pcp))
+                missing_block_count = 1;
+
             /*
              * Allocate and fill the bitmap.
              */
             if ((error = (*pcp->pc_sysdep->sys_malloc)(
-                     &v1p->v1_bitmap, pcp->pc_head.totalblock)) == 0) {
+                     &v1p->v1_bitmap,
+                     pcp->pc_head.totalblock + missing_block_count)) == 0) {
                 uint64_t r_size;
 
                 (void)(*pcp->pc_sysdep->sys_seek)(
@@ -633,6 +687,9 @@ v2_verify(pc_context_t *pcp) {
 
                             if (v2_is_ntfs_image(pcp)) {
                                 error = copy_ntfs_boot_sector(pcp);
+                                if (!error) {
+                                    install_ntfs_shims(pcp);
+                                }
                             }
 
                             if (error == 0) {

@@ -42,7 +42,7 @@ typedef struct libpc_context {
     uint8_t *                      pc_ivblock;   /* Convenient invalid block */
     uint8_t *                      pc_ntfs_boot; /* Copy of NTFS's boot sector */
     void *                         pc_verdep;    /* Version-dependent handle */
-    struct version_dispatch_table *pc_dispatch;  /* Version-dependent dispatch */
+    struct version_dispatch_table const *pc_dispatch;  /* Version-dependent dispatch */
     const sysdep_dispatch_t *      pc_sysdep;    /* System-specific routines */
     union {
         image_head_v1 pc_head_v1;
